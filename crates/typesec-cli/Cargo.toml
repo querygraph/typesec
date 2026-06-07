@@ -18,7 +18,7 @@ path = "../../examples/odrl_agent.rs"
 
 [[example]]
 name = "company_graph_grust_sail"
-path = "../../examples/company_graph_grust_sail.rs"
+path = "../../examples/company_graph/company_graph_grust_sail.rs"
 
 [dependencies]
 typesec-core = { path = "../typesec-core" }

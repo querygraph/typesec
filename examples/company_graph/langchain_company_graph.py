@@ -6,7 +6,7 @@ tool is wrapped by a Typesec policy check before it mutates the in-memory graph.
 
 Run from the repository root:
 
-    python3 examples/langchain_company_graph.py
+    python3 examples/company_graph/langchain_company_graph.py
 
 The generated graph mirrors `company_graph_grust_sail.rs`; the Rust example
 persists the same network through Grust's Sail backend when Sail is available.
@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 POLICY = """
 roles:

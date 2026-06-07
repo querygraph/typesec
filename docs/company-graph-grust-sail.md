@@ -4,7 +4,7 @@ This example models agents writing a company hierarchy graph while Typesec gates
 which nodes and relationships each agent may touch.
 
 - Rust + Grust + Sail: `cargo run -p typesec-cli --example company_graph_grust_sail`
-- Python LangChain-style wrapper: `python3 examples/langchain_company_graph.py`
+- Python LangChain-style wrapper: `python3 examples/company_graph/langchain_company_graph.py`
 
 The generated network is:
 

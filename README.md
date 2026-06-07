@@ -182,6 +182,9 @@ cargo run --example rbac_agent
 cargo run --example odrl_agent
 ```
 
+For the full example catalog, install commands, and run commands, see
+[`examples/README_examples.md`](examples/README_examples.md).
+
 ---
 
 ## Why this matters for AI agents

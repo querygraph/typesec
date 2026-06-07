@@ -168,8 +168,8 @@ The repository also includes:
 ```text
 examples/rbac_agent.rs
 examples/odrl_agent.rs
-examples/company_graph_grust_sail.rs
-examples/langchain_company_graph.py
+examples/company_graph/company_graph_grust_sail.rs
+examples/company_graph/langchain_company_graph.py
 policies/rbac-example.yaml
 policies/odrl-example.yaml
 docs/company-graph-grust-sail.md
