@@ -10,7 +10,7 @@ pub struct ValidateArgs {
     #[arg(long)]
     pub policy: PathBuf,
 
-    /// Policy format: `rbac` or `odrl` (auto-detected from content if omitted).
+    /// Policy format: `rbac`, `odrl`, or `graph` (auto-detected from content if omitted).
     #[arg(long)]
     pub format: Option<String>,
 }
@@ -51,8 +51,20 @@ pub fn run(args: ValidateArgs) -> Result<()> {
                 );
             }
         }
+        Some("graph") => {
+            let doc = typesec_rbac::graph_policy::GraphPolicyDocument::from_yaml(&yaml)?;
+            doc.validate().map_err(|e| anyhow::anyhow!(e))?;
+            let graph = &doc.graph_policy.graph;
+            let rule_count = doc.graph_policy.rules.len();
+            println!("✓ Graph policy is valid");
+            println!("  Nodes: {}", graph.nodes.len());
+            println!("  Edges: {}", graph.edges.len());
+            println!("  Rules: {rule_count}");
+        }
         _ => {
-            anyhow::bail!("Could not detect policy format. Use --format rbac or --format odrl");
+            anyhow::bail!(
+                "Could not detect policy format. Use --format rbac, --format odrl, or --format graph"
+            );
         }
     }
 
@@ -63,7 +75,9 @@ fn detect_format(explicit: &Option<String>, yaml: &str) -> Option<String> {
     if let Some(f) = explicit {
         return Some(f.clone());
     }
-    if yaml.contains("roles:") && yaml.contains("assignments:") {
+    if yaml.contains("graph_policy:") {
+        Some("graph".into())
+    } else if yaml.contains("roles:") && yaml.contains("assignments:") {
         Some("rbac".into())
     } else if yaml.contains("policies:") && yaml.contains("rules:") {
         Some("odrl".into())

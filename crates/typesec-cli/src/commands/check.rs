@@ -23,7 +23,7 @@ pub struct CheckArgs {
     #[arg(long)]
     pub resource: String,
 
-    /// Policy format: `rbac` or `odrl`.
+    /// Policy format: `rbac`, `odrl`, or `graph`.
     #[arg(long)]
     pub format: Option<String>,
 
@@ -54,7 +54,14 @@ pub fn run(args: CheckArgs) -> Result<()> {
             };
             engine.check(&args.subject, &args.action, &args.resource)
         }
-        _ => anyhow::bail!("Could not detect policy format. Use --format rbac or --format odrl"),
+        Some("graph") => {
+            let engine = typesec_rbac::GraphPolicyEngine::from_yaml(&yaml)
+                .map_err(|e| anyhow::anyhow!(e))?;
+            engine.check(&args.subject, &args.action, &args.resource)
+        }
+        _ => anyhow::bail!(
+            "Could not detect policy format. Use --format rbac, --format odrl, or --format graph"
+        ),
     };
 
     match &result {
@@ -86,7 +93,9 @@ fn detect_format(explicit: &Option<String>, yaml: &str) -> Option<String> {
     if let Some(f) = explicit {
         return Some(f.clone());
     }
-    if yaml.contains("roles:") {
+    if yaml.contains("graph_policy:") {
+        Some("graph".into())
+    } else if yaml.contains("roles:") {
         Some("rbac".into())
     } else if yaml.contains("policies:") {
         Some("odrl".into())

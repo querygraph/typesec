@@ -167,13 +167,30 @@ examples/company_graph/
 The company graph examples model agents writing a company hierarchy while
 Typesec gates node, relationship, and sensitive-network access.
 
-The policy roles are:
+The graph policy is:
+
+```text
+policies/graph-corporate-example.yaml
+```
+
+It defines the company hierarchy, agent-role edges, and policy predicates in one
+Grust graph. The effective roles are:
 
 - `agent:executive-chief` can write the company graph and read the sensitive
   employee network.
 - `agent:hr-onboarding` can write non-executive employee nodes and reporting
   relationships.
 - `agent:employee-nia` can write only her own public profile.
+
+Validate and check the graph policy:
+
+```sh
+cargo run -p typesec-cli -- validate --policy policies/graph-corporate-example.yaml
+cargo run -p typesec-cli -- check --policy policies/graph-corporate-example.yaml \
+  --subject agent:hr-onboarding \
+  --action write \
+  --resource employee/private/employee:nia
+```
 
 ### Rust + Grust + Sail
 
@@ -186,7 +203,7 @@ examples/company_graph/company_graph_grust_sail.rs
 This example uses published Grust crates:
 
 ```toml
-grust-graph = { version = "0.1.0", features = ["sail"] }
+grust-graph = { version = "0.2.0", features = ["sail"] }
 ```
 
 It builds a backend-neutral property graph through the `grust` facade. If a Sail

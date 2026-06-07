@@ -14,38 +14,9 @@ use typesec_core::{
     permissions::{CanReadSensitive, CanWrite},
     policy::CapabilityError,
 };
-use typesec_rbac::RbacEngine;
+use typesec_rbac::GraphPolicyEngine;
 
-const POLICY: &str = r#"
-roles:
-  - name: executive_graph_admin
-    permissions: [read_sensitive, write]
-    resources:
-      - "company/*"
-      - "employee/**"
-      - "relationship/**"
-      - "network/**"
-
-  - name: hr_graph_writer
-    permissions: [write]
-    resources:
-      - "employee/public/**"
-      - "employee/private/employee:*"
-      - "relationship/reports_to/**"
-
-  - name: employee_self_service
-    permissions: [write]
-    resources:
-      - "employee/public/employee:nia"
-
-assignments:
-  - subject: "agent:executive-chief"
-    roles: [executive_graph_admin]
-  - subject: "agent:hr-onboarding"
-    roles: [hr_graph_writer]
-  - subject: "agent:employee-nia"
-    roles: [employee_self_service]
-"#;
+const POLICY: &str = include_str!("../../policies/graph-corporate-example.yaml");
 
 #[derive(Debug, Clone)]
 struct CompanyGraphResource {
@@ -229,7 +200,7 @@ async fn request_write_cap<R: Resource>(
 async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt().with_env_filter("info").init();
 
-    let engine = Arc::new(RbacEngine::from_yaml(POLICY)?);
+    let engine = Arc::new(GraphPolicyEngine::from_yaml(POLICY)?);
 
     let executive = SecureAgent::new(engine.clone())
         .authenticate(Credentials::new("agent:executive-chief", "tok"))?;
@@ -243,7 +214,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         name: "Evelyn Chen",
         title: "Chief Executive Officer",
         department: "Executive",
-        level: "E",
+        level: "Executive",
         compensation_band: "exec-1",
     };
     let priya = Employee {

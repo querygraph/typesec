@@ -5,6 +5,7 @@ which nodes and relationships each agent may touch.
 
 - Rust + Grust + Sail: `cargo run -p typesec-cli --example company_graph_grust_sail`
 - Python LangChain-style wrapper: `python3 examples/company_graph/langchain_company_graph.py`
+- Graph policy: `policies/graph-corporate-example.yaml`
 
 The generated network is:
 
@@ -16,7 +17,7 @@ employee:evelyn CEO
           <- REPORTS_TO employee:omar Data Engineer
 ```
 
-The policy makes the direction of access explicit:
+The graph policy makes the direction of access explicit:
 
 - `agent:executive-chief` can write the company graph and read sensitive
   employee network data.
@@ -24,6 +25,25 @@ The policy makes the direction of access explicit:
   relationships, but cannot write executive-only nodes.
 - `agent:employee-nia` can write only her own public profile and cannot read the
   sensitive network.
+
+The policy file defines the protected company graph using Grust's YAML graph
+format. Agent-role edges, employee nodes, and `REPORTS_TO` edges are part of the
+same graph. Rules can then test graph predicates such as:
+
+- subject has a `HAS_ROLE` edge to the required role.
+- target employee node has label `Employee`.
+- target employee level is not `Executive`.
+- a proposed `REPORTS_TO` edge would not create a cycle.
+
+You can check the graph policy directly:
+
+```sh
+cargo run -p typesec-cli -- validate --policy policies/graph-corporate-example.yaml
+cargo run -p typesec-cli -- check --policy policies/graph-corporate-example.yaml \
+  --subject agent:hr-onboarding \
+  --action write \
+  --resource employee/private/employee:nia
+```
 
 The Rust example uses Grust to construct a backend-neutral property graph. When
 Sail SparkConnect is listening on `127.0.0.1:50051`, it writes the graph through

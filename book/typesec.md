@@ -208,7 +208,7 @@ published facade crate:
 
 ```toml
 [dev-dependencies]
-grust-graph = { version = "0.1.0", features = ["sail"] }
+grust-graph = { version = "0.2.0", features = ["sail"] }
 ```
 
 The package is named `grust-graph`, while its library is imported as `grust`.

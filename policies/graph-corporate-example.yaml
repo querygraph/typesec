@@ -1,0 +1,134 @@
+# Graph policy example for the corporate hierarchy.
+#
+# This is not just a resource glob list. The protected org chart, agent-role
+# bindings, and policy predicates all live in one Grust graph definition.
+
+graph_policy:
+  graph:
+    nodes:
+      - id: agent:executive-chief
+        label: Agent
+      - id: agent:hr-onboarding
+        label: Agent
+      - id: agent:employee-nia
+        label: Agent
+
+      - id: role:executive_graph_admin
+        label: Role
+      - id: role:hr_graph_writer
+        label: Role
+      - id: role:employee_self_service
+        label: Role
+
+      - id: employee:evelyn
+        label: Employee
+        props:
+          name: Evelyn Chen
+          title: Chief Executive Officer
+          department: Executive
+          level: Executive
+          compensation_band: exec-1
+      - id: employee:priya
+        label: Employee
+        props:
+          name: Priya Raman
+          title: VP Engineering
+          department: Engineering
+          level: VP
+          compensation_band: vp-2
+      - id: employee:marco
+        label: Employee
+        props:
+          name: Marco Silva
+          title: Engineering Manager
+          department: Engineering
+          level: M2
+          compensation_band: m2-3
+      - id: employee:nia
+        label: Employee
+        props:
+          name: Nia Patel
+          title: Senior Software Engineer
+          department: Engineering
+          level: IC4
+          compensation_band: ic4-4
+      - id: employee:omar
+        label: Employee
+        props:
+          name: Omar Haddad
+          title: Data Engineer
+          department: Data
+          level: IC3
+          compensation_band: ic3-2
+
+    edges:
+      - label: HAS_ROLE
+        from: agent:executive-chief
+        to: role:executive_graph_admin
+      - label: HAS_ROLE
+        from: agent:hr-onboarding
+        to: role:hr_graph_writer
+      - label: HAS_ROLE
+        from: agent:employee-nia
+        to: role:employee_self_service
+
+      - label: REPORTS_TO
+        from: employee:priya
+        to: employee:evelyn
+      - label: REPORTS_TO
+        from: employee:marco
+        to: employee:priya
+      - label: REPORTS_TO
+        from: employee:nia
+        to: employee:marco
+      - label: REPORTS_TO
+        from: employee:omar
+        to: employee:marco
+
+  rules:
+    - subject_has_role: role:executive_graph_admin
+      action: write
+      resource: company/*
+
+    - subject_has_role: role:executive_graph_admin
+      action: read_sensitive
+      resource: network/*
+
+    - subject_has_role: role:executive_graph_admin
+      action: write
+      resource: employee/executive/*
+      where:
+        target:
+          resource_prefix: employee/executive/
+          label: Employee
+          property_equals:
+            level: Executive
+
+    - subject_has_role: role:hr_graph_writer
+      action: write
+      resource: employee/private/*
+      where:
+        target:
+          resource_prefix: employee/private/
+          label: Employee
+          property_not_equals:
+            level: Executive
+
+    - subject_has_role: role:hr_graph_writer
+      action: write
+      resource: relationship/reports_to/*/*
+      where:
+        relationship:
+          resource_prefix: relationship/reports_to/
+          edge_label: REPORTS_TO
+          from_label: Employee
+          to_label: Employee
+          no_cycle: true
+
+    - subject: agent:employee-nia
+      action: write
+      resource: employee/public/employee:nia
+      where:
+        target:
+          resource_prefix: employee/public/
+          label: Employee

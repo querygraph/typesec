@@ -36,7 +36,9 @@
 
 pub mod codegen;
 pub mod engine;
+pub mod graph_policy;
 pub mod model;
 
 pub use engine::RbacEngine;
+pub use graph_policy::GraphPolicyEngine;
 pub use model::{Assignment, RbacPolicy, RoleDefinition};
