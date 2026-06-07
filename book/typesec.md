@@ -14,6 +14,16 @@ The intent is not just to say what the repository contains, but to explain why
 each piece exists, how the pieces fit together, and what security property the
 system is trying to make harder to accidentally lose.
 
+One direct inspiration was David Andrzejewski's Scale By the Bay 2018 talk,
+["Privacy aware data science in Scala with monads and type level programming"](https://www.youtube.com/watch?v=hoVIqh1qjXM).
+That talk connected notebook-era data science, information-flow control, and
+type-level programming. It also pointed back to the Haskell
+[SecLib](https://hackage.haskell.org/package/seclib-0.7) model of wrapping
+data in a security-labeled container. Typesec takes that lineage in a Rust
+direction: runtime policy still decides, but the proof and the protected data
+shape are carried by types. A cleaned transcript of David's talk is included at
+`docs/david-andrzejewski-scale-by-the-bay-2018-transcript.md`.
+
 The project began from a simple observation: agentic software makes ordinary
 authorization mistakes more dangerous. A human-facing web request usually has a
 short life. An AI agent can be long-running, can call many tools, can make many
@@ -36,6 +46,12 @@ report should accept a write capability. Code that reads sensitive data should
 accept a sensitive-read capability. Code that exfiltrates data should be forced
 to say so in its type signature. The ideal is a codebase where the compiler can
 show us the security boundary before the program ever runs.
+
+The newer `SecureValue<L, T, R>` layer extends that idea from operations to data
+itself. A sensitive string can be transformed while it remains opaque. It can be
+combined with other values while the type-level label tracks the more
+restrictive result. It cannot be unwrapped or declassified unless the caller has
+the corresponding capability.
 
 The repository now lives at:
 
@@ -155,7 +171,7 @@ whether the proof should be minted.
 The repository is a Rust workspace with six crates:
 
 ```text
-typesec-core      traits, phantom types, Capability, PolicyEngine, typestate
+typesec-core      traits, phantom types, Capability, SecureValue, PolicyEngine, typestate
 typesec-rbac      YAML RBAC parser, validator, engine, and code generator
 typesec-odrl      YAML ODRL subset, constraints, prohibitions, and audit events
 typesec-agent     SecureAgent wrapper for async capability requests and execute
@@ -173,6 +189,7 @@ examples/company_graph/langchain_company_graph.py
 policies/rbac-example.yaml
 policies/odrl-example.yaml
 docs/company-graph-grust-sail.md
+docs/david-andrzejewski-scale-by-the-bay-2018-transcript.md
 docs/improvements.md
 docs/typesec-claude1.md
 tests/python/test_cli_policy.py
@@ -206,7 +223,7 @@ the Sail adapter types.
 
 The core crate is where the security idea becomes concrete. It contains the
 unforgeable capability type, permission markers, resource abstraction, policy
-engine trait, typestate agent, and policy combinators.
+engine trait, typestate agent, policy combinators, and security-labeled values.
 
 ## Capabilities
 
@@ -258,6 +275,7 @@ execute
 delegate
 read_sensitive
 write_sensitive
+declassify
 ```
 
 It also includes AI-oriented permissions:
@@ -272,6 +290,59 @@ The exfiltration permission is especially important. If an agent can send data
 outside a trust boundary, that path should not be hidden inside an ordinary
 "write" operation. A function that requires
 `Capability<AiCanExfiltrate, CustomerData>` announces the risk in its signature.
+
+The declassification permission is similarly explicit. If code lowers a
+protected value from `Sensitive` or `Secret` to `Public`, it should not look like
+an ordinary read. A function that accepts `Capability<CanDeclassify, Report>`
+is telling reviewers that this path intentionally releases a derived value.
+
+## Secure Values
+
+SecLib's useful lesson for Typesec is that the protected value itself should
+have a shape the compiler can recognize. Typesec now has:
+
+```rust
+pub struct SecureValue<L: PrivacyLevel, T, R: Resource> {
+    value: T,
+    resource_id: String,
+    _label: PhantomData<fn() -> L>,
+    _resource: PhantomData<fn() -> R>,
+}
+```
+
+The fields are private. Consumers cannot extract `value` by pattern matching.
+They can transform it:
+
+```rust
+let email: SecureValue<Sensitive, String, CustomerRecord> =
+    SecureValue::protect(customer.email, &customer);
+
+let domain = email.map(|addr| addr.split('@').last().unwrap_or("").to_owned());
+```
+
+The label is preserved through `map`. When two protected values are combined
+with `zip`, the `Join` trait computes the more restrictive privacy label:
+
+```text
+Public + Sensitive -> Sensitive
+Sensitive + Secret -> Secret
+Internal + Public -> Internal
+```
+
+This is deliberately small. It is not a complete information-flow-control
+language, and it does not model every SecLib operation. But it gives application
+code a first-class way to keep sensitive data opaque while still doing useful
+work with it.
+
+Extraction is limited to explicit release paths. `SecureValue<Public, T, R>` can
+be unwrapped with `into_public`. Any protected label can be revealed with a
+`Capability<CanReadSensitive, R>`. To lower the label, code must hold:
+
+```rust
+Capability<CanDeclassify, R>
+```
+
+That makes declassification visible at the call site and in the policy log.
 
 ## Resources
 
@@ -594,6 +665,12 @@ until after policy has minted a capability.
 The example also demonstrates denial. An agent assigned to a role with read
 permissions cannot use a write permission unless the policy grants it.
 
+The updated RBAC example also demonstrates the SecLib-inspired data container.
+It protects a report summary as `SecureValue<Sensitive, String, GenericResource>`,
+maps it to a length digest while it remains opaque, denies declassification for
+the ordinary analyst, and then allows a `privacy_reviewer` role to declassify
+the digest after policy mints `Capability<CanDeclassify, GenericResource>`.
+
 ## ODRL Agent
 
 The ODRL example demonstrates contextual policy. Purpose matters. A read for
@@ -799,6 +876,12 @@ The published Grust integration also records a naming tradeoff. The package is
 published as `grust-graph`, but it exposes the facade library as `grust`, so
 examples can keep the natural `use grust::prelude::*` shape.
 
+The new `SecureValue` API is another compromise. It brings information-flow
+style labeled data into the Rust workspace without pretending to be a full
+language-level IFC system. The type-level `Join` lattice is intentionally small
+and sealed. That keeps the model reviewable, while still giving examples a real
+opaque value that can be transformed before explicit reveal or declassification.
+
 # Roadmap
 
 The next phase should focus on proving the central promises more directly.
@@ -810,6 +893,7 @@ unauthenticated agents cannot request capabilities
 actions cannot execute without capabilities
 read capabilities cannot be passed where write capabilities are required
 ordinary write cannot satisfy ai:exfiltrate
+sensitive values cannot be unwrapped without reveal or declassify authority
 ```
 
 Second, make generated policy code part of the examples. If `typesec generate`
@@ -846,6 +930,12 @@ against a known local service profile. The current example gracefully skips Sail
 when it is not listening; a fuller demo could include setup instructions or a
 containerized path.
 
+Eighth, extend `SecureValue` beyond the built-in four-label lattice. The current
+labels are `Public`, `Internal`, `Sensitive`, and `Secret`. Domain-specific
+deployments may want generated labels from policy files, capability-bound
+declassification reasons, or audited release records that carry policy version
+and purpose.
+
 # Conclusion
 
 Typesec is a small system with a sharp idea: authorization should not only be a
@@ -858,6 +948,7 @@ The repository now contains the first coherent version of that idea:
 
 ```text
 typed capabilities
+opaque secure values
 sealed permissions
 resource abstractions
 typestate authentication

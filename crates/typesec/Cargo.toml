@@ -15,8 +15,8 @@ odrl = ["dep:typesec-odrl"]
 macros = ["dep:typesec-macro"]
 
 [dependencies]
-typesec-core = { version = "0.1.0", path = "../typesec-core" }
-typesec-agent = { version = "0.1.0", path = "../typesec-agent", optional = true }
-typesec-rbac = { version = "0.1.0", path = "../typesec-rbac", optional = true }
-typesec-odrl = { version = "0.1.0", path = "../typesec-odrl", optional = true }
-typesec-macro = { version = "0.1.0", path = "../typesec-macro", optional = true }
+typesec-core = { version = "0.2.0", path = "../typesec-core" }
+typesec-agent = { version = "0.2.0", path = "../typesec-agent", optional = true }
+typesec-rbac = { version = "0.2.0", path = "../typesec-rbac", optional = true }
+typesec-odrl = { version = "0.2.0", path = "../typesec-odrl", optional = true }
+typesec-macro = { version = "0.2.0", path = "../typesec-macro", optional = true }

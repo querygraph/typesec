@@ -2,6 +2,14 @@
 
 **Agentic AI security using Rust's type system.**
 
+Typesec was inspired by David Andrzejewski's Scale By the Bay talk,
+["Privacy aware data science in Scala with monads and type level programming"](https://www.youtube.com/watch?v=hoVIqh1qjXM),
+which connected data-science privacy work to typed information-flow control.
+That talk traces part of its implementation lineage to the Haskell
+[SecLib](https://hackage.haskell.org/package/seclib-0.7) security-container
+library; we keep a local [cleaned transcript](docs/david-andrzejewski-scale-by-the-bay-2018-transcript.md)
+as design context for this repository.
+
 Policies are encoded in types. Violations are compile errors.
 
 ---
@@ -58,6 +66,11 @@ The foundation. Defines:
 
 - **`Capability<P, R>`** — unforgeable proof token. `P` is a permission type, `R` is a
   resource type. Holding one means a `PolicyEngine` approved the access.
+
+- **`SecureValue<L, T, R>`** — opaque labeled data, inspired by information-flow
+  security libraries such as SecLib. Code can transform the contained `T` with
+  `map` and `zip`, but cannot extract protected values without a typed
+  capability. Combining values keeps the more restrictive privacy label.
 
 - **`Agent<S>`** — typestate machine. `S ∈ {Unauthenticated, Authenticated}`. The
   `AgentState` trait is sealed; you can't forge states.
@@ -218,6 +231,18 @@ policy engine, which logs the decision.
 The `AiCanExfiltrate` permission is especially notable: any code path that sends
 data outside the system boundary must carry a `Capability<AiCanExfiltrate, _>`.
 Data-leak paths are visible at compile time, not just detectable in production logs.
+
+`SecureValue` extends that model from operations to data itself:
+
+```rust
+let email: SecureValue<Sensitive, String, CustomerRecord> =
+    SecureValue::protect(customer.email, &customer);
+
+let domain = email.map(|addr| addr.split('@').last().unwrap_or("").to_owned());
+
+// Requires Capability<CanDeclassify, CustomerRecord>.
+let public_domain = domain.declassify(&declassify_cap).into_public();
+```
 
 ---
 

@@ -87,6 +87,13 @@ pub struct CanReadSensitive;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CanWriteSensitive;
 
+/// Permission to intentionally lower the security label of protected data.
+///
+/// This is the typed equivalent of an information-flow "escape hatch": code that
+/// declassifies sensitive data must make that authority visible in its signature.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct CanDeclassify;
+
 // ── AI-specific permissions ───────────────────────────────────────────────────
 
 /// Permission for an AI agent to run inference over a resource.
@@ -130,6 +137,7 @@ impl_permission! {
     CanDelegate      => "delegate",
     CanReadSensitive  => "read_sensitive",
     CanWriteSensitive => "write_sensitive",
+    CanDeclassify     => "declassify",
     AiCanInfer       => "ai:infer",
     AiCanTrain       => "ai:train",
     AiCanExfiltrate  => "ai:exfiltrate",

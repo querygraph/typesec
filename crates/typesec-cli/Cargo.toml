@@ -24,10 +24,10 @@ name = "company_graph_grust_sail"
 path = "../../examples/company_graph/company_graph_grust_sail.rs"
 
 [dependencies]
-typesec-core = { version = "0.1.0", path = "../typesec-core" }
-typesec-rbac = { version = "0.1.0", path = "../typesec-rbac" }
-typesec-odrl = { version = "0.1.0", path = "../typesec-odrl" }
-typesec-agent = { version = "0.1.0", path = "../typesec-agent" }
+typesec-core = { version = "0.2.0", path = "../typesec-core" }
+typesec-rbac = { version = "0.2.0", path = "../typesec-rbac" }
+typesec-odrl = { version = "0.2.0", path = "../typesec-odrl" }
+typesec-agent = { version = "0.2.0", path = "../typesec-agent" }
 tokio = { workspace = true }
 clap = { workspace = true }
 serde = { workspace = true }

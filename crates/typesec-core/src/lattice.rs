@@ -38,8 +38,8 @@ use crate::{
     Permission, Resource,
     capability::Capability,
     permissions::{
-        AiCanExfiltrate, AiCanInfer, AiCanTrain, CanDelegate, CanDelete, CanRead, CanReadSensitive,
-        CanWrite, CanWriteSensitive,
+        AiCanExfiltrate, AiCanInfer, AiCanTrain, CanDeclassify, CanDelegate, CanDelete, CanRead,
+        CanReadSensitive, CanWrite, CanWriteSensitive,
     },
     policy::{PolicyEngine, PolicyResult},
 };
@@ -74,6 +74,10 @@ impl Implies<CanRead> for CanReadSensitive {}
 impl Implies<CanWrite> for CanWriteSensitive {}
 impl Implies<CanReadSensitive> for CanWriteSensitive {}
 impl Implies<CanRead> for CanWriteSensitive {}
+
+// CanDeclassify → CanReadSensitive, CanRead
+impl Implies<CanReadSensitive> for CanDeclassify {}
+impl Implies<CanRead> for CanDeclassify {}
 
 // AiCanTrain → AiCanInfer, CanRead
 impl Implies<AiCanInfer> for AiCanTrain {}
@@ -180,11 +184,12 @@ fn implied_by(permission: &str) -> &'static [&'static str] {
             "delegate",
             "read_sensitive",
             "write_sensitive",
+            "declassify",
             "ai:train",
             "ai:exfiltrate",
         ],
         "write" => &["write_sensitive"],
-        "read_sensitive" => &["write_sensitive"],
+        "read_sensitive" => &["write_sensitive", "declassify"],
         "ai:infer" => &["ai:train", "ai:exfiltrate"],
         _ => &[],
     }

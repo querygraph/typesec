@@ -116,6 +116,9 @@ This Rust example demonstrates the basic RBAC capability flow:
 3. Request a typed capability.
 4. Execute an action only after the capability exists.
 5. Show that denied requests do not mint capabilities.
+6. Protect sensitive report data in `SecureValue<Sensitive, _, _>`, transform it
+   while opaque, and declassify only when the agent holds
+   `Capability<CanDeclassify, _>`.
 
 Run it:
 

@@ -29,6 +29,8 @@
 //! - [`Capability`] — unforgeable proof token: `Capability<P, R>` proves the bearer
 //!   holds permission `P` on resource `R`. The phantom types make
 //!   `Capability<CanRead, Report>` and `Capability<CanWrite, Report>` *different types*.
+//! - [`SecureValue`] — an opaque labeled value that supports safe transformations
+//!   while requiring typed authority to reveal or declassify protected data.
 //! - [`Agent`] — typestate machine: `Agent<Unauthenticated>` → `Agent<Authenticated>`.
 //!   Authenticated methods are literally absent on the unauthenticated state.
 //! - [`PolicyEngine`] — the runtime bridge: dynamic policies (RBAC, ODRL) evaluated
@@ -44,6 +46,7 @@ pub mod permissions;
 pub mod policy;
 pub mod resource;
 pub mod role;
+pub mod secure_value;
 pub mod typestate;
 
 // Re-export the most important types at crate root.
@@ -51,10 +54,11 @@ pub use capability::Capability;
 pub use combinator::{CombineStrategy, ComposedEngine, PolicyEngineBuilder};
 pub use lattice::{Implies, LatticeEngine};
 pub use permissions::{
-    AiCanExfiltrate, AiCanInfer, AiCanTrain, CanDelegate, CanDelete, CanExecute, CanRead,
-    CanReadSensitive, CanWrite, CanWriteSensitive, Permission,
+    AiCanExfiltrate, AiCanInfer, AiCanTrain, CanDeclassify, CanDelegate, CanDelete, CanExecute,
+    CanRead, CanReadSensitive, CanWrite, CanWriteSensitive, Permission,
 };
 pub use policy::{AuditEvent, FallbackEngine, PolicyEngine, PolicyResult, mint_capability};
 pub use resource::Resource;
 pub use role::Role;
+pub use secure_value::{Internal, Join, PrivacyLevel, Public, Secret, SecureValue, Sensitive};
 pub use typestate::{Agent, AgentState, Authenticated, Credentials, Unauthenticated};

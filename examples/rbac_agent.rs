@@ -20,14 +20,17 @@
 //! 3. **Runtime RBAC checking**: The `data-pipeline` agent can read reports
 //!    but not write them. The capability request for write returns an error.
 //!
-//! 4. **Audit trail**: Every policy decision is logged via `tracing`.
+//! 4. **Labeled values**: Sensitive data can be transformed while opaque, then
+//!    declassified only by an agent with `CanDeclassify`.
+//!
+//! 5. **Audit trail**: Every policy decision is logged via `tracing`.
 
 use std::sync::Arc;
 
 use typesec_agent::SecureAgent;
 use typesec_core::{
-    Credentials, Resource,
-    permissions::{CanRead, CanWrite},
+    Credentials, Resource, SecureValue, Sensitive,
+    permissions::{CanDeclassify, CanRead, CanWrite},
     resource::GenericResource,
 };
 use typesec_rbac::RbacEngine;
@@ -37,17 +40,22 @@ roles:
   - name: analyst
     permissions: [read, read_sensitive]
     resources: ["reports/*", "metrics/*"]
+  - name: privacy_reviewer
+    permissions: [read, read_sensitive, declassify]
+    resources: ["reports/*"]
   - name: engineer
     permissions: [read, write, execute]
     resources: ["code/*", "infra/*"]
   - name: admin
     inherits: [analyst, engineer]
-    permissions: [delete, delegate]
+    permissions: [read, write, delete, delegate]
     resources: ["*"]
 
 assignments:
   - subject: "agent:data-pipeline"
     roles: [analyst]
+  - subject: "agent:privacy-reviewer"
+    roles: [privacy_reviewer]
   - subject: "agent:deploy-bot"
     roles: [engineer]
   - subject: "agent:superadmin"
@@ -96,6 +104,44 @@ async fn main() {
     match agent.request_capability::<CanWrite, _>(&report).await {
         Ok(cap) => println!("✗ Got write cap (unexpected!): {cap}"),
         Err(e) => println!("✓ Write denied (expected): {e}"),
+    }
+
+    let sensitive_summary: SecureValue<Sensitive, String, GenericResource> =
+        SecureValue::protect("revenue=42m; customer_count=1200".to_owned(), &report);
+    let report_digest = sensitive_summary.map(|summary| format!("len={}", summary.len()));
+
+    // ✗ The analyst can transform the protected value above, but cannot declassify it.
+    match agent.request_capability::<CanDeclassify, _>(&report).await {
+        Ok(cap) => {
+            let public_digest = report_digest.declassify(&cap).into_public();
+            println!("✗ Analyst declassified digest unexpectedly: {public_digest}");
+        }
+        Err(e) => println!("✓ Declassify denied for analyst (expected): {e}"),
+    }
+
+    println!();
+
+    // ── Privacy reviewer agent ──────────────────────────────────────────────
+    println!("--- agent:privacy-reviewer (role: privacy_reviewer) ---");
+
+    let reviewer = SecureAgent::new(engine.clone());
+    let reviewer = reviewer
+        .authenticate(Credentials::new("agent:privacy-reviewer", "token-review"))
+        .expect("auth ok");
+
+    let sensitive_summary: SecureValue<Sensitive, String, GenericResource> =
+        SecureValue::protect("revenue=42m; customer_count=1200".to_owned(), &report);
+    let report_digest = sensitive_summary.map(|summary| format!("len={}", summary.len()));
+
+    match reviewer
+        .request_capability::<CanDeclassify, _>(&report)
+        .await
+    {
+        Ok(cap) => {
+            let public_digest = report_digest.declassify(&cap).into_public();
+            println!("✓ Declassified approved digest: {public_digest}");
+        }
+        Err(e) => println!("✗ Declassify denied unexpectedly: {e}"),
     }
 
     println!();
