@@ -778,44 +778,6 @@ cargo check --example company_graph_grust_sail
 
 Both passed.
 
-# Publishing the Repository
-
-The local repository initially had no remote and no commits. It was connected to
-GitHub as:
-
-```sh
-git remote add origin git@github.com:alexy/typesec.git
-```
-
-The branch was renamed from `master` to `main`, staged, and committed as:
-
-```text
-dbb38aa Initial typesec workspace
-```
-
-Before pushing, a generated Python bytecode file was removed from the commit and
-`.gitignore` was updated with:
-
-```text
-__pycache__/
-*.py[cod]
-```
-
-The remote already contained an initial commit with a `LICENSE` file:
-
-```text
-2cd9182 Initial commit
-```
-
-Rather than force-push over it, the remote branch was fetched and merged:
-
-```text
-05d8144 Merge remote-tracking branch 'origin/main'
-```
-
-The final push updated `origin/main`, and the local `main` branch now tracks the
-GitHub remote.
-
 # What We Improved
 
 The improvement notes in `docs/improvements.md` record a useful snapshot of the
@@ -961,7 +923,6 @@ Rust examples
 Python tool-gating example
 Grust/Sail graph integration
 tests and documentation
-published GitHub remote
 ```
 
 The design is not finished, but it is real enough to build on. The next work is
