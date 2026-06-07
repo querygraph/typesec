@@ -17,7 +17,7 @@ version = "0.3.0"
 edition = "2024"
 authors = ["typesec contributors"]
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/alexy/typesec"
+repository = "https://github.com/querygraph/typesec"
 
 [workspace.dependencies]
 # Async

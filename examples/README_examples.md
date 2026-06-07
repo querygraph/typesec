@@ -10,7 +10,7 @@ that shells out to the Typesec CLI.
 Run these commands from a fresh checkout:
 
 ```sh
-git clone git@github.com:alexy/typesec.git
+git clone git@github.com:querygraph/typesec.git
 cd typesec
 
 cargo build --workspace

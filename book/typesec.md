@@ -52,7 +52,7 @@ the corresponding capability.
 The repository now lives at:
 
 ```text
-git@github.com:alexy/typesec.git
+git@github.com:querygraph/typesec.git
 ```
 
 The local branch `main` tracks `origin/main`. Before publishing, the workspace
