@@ -191,17 +191,16 @@ grust = { path = "../../../grust/crates/grust", features = ["sail"] }
 ```
 
 After the Grust crates were published, the dependency was moved to the
-published crates:
+published facade crate:
 
 ```toml
 [dev-dependencies]
-grust-core = "0.1.0"
-grust-sail = "0.1.0"
+grust-graph = { version = "0.1.0", features = ["sail"] }
 ```
 
-This was necessary because the `grust` crate name on crates.io is already owned
-by an unrelated GNOME bindings project. The property graph system is consumed
-through the split crates `grust-core` and `grust-sail`.
+The package is named `grust-graph`, while its library is imported as `grust`.
+The facade re-exports the core graph API and, with the `sail` feature enabled,
+the Sail adapter types.
 
 # `typesec-core`
 
@@ -623,20 +622,19 @@ agent:hr-onboarding     writes non-executive employees and reporting lines
 agent:employee-nia      writes only Nia's public self-service profile
 ```
 
-The Rust example uses `grust-core` to build a backend-neutral property graph and
-`grust-sail` to write the graph when a Sail SparkConnect server is available at
-`127.0.0.1:50051`. If Sail is not running, the example still demonstrates the
-Typesec decisions and prints the graph.
+The Rust example uses the `grust` facade to build a backend-neutral property
+graph and to write the graph through the Sail adapter when a Sail SparkConnect
+server is available at `127.0.0.1:50051`. If Sail is not running, the example
+still demonstrates the Typesec decisions and prints the graph.
 
 The import shape after switching to the published Grust crates is:
 
 ```rust
-use grust_core::prelude::*;
-use grust_sail::{SailConfig, SailGraphStore};
+use grust::prelude::*;
 ```
 
-That change is important because it records the published-crate boundary. The
-example no longer depends on a sibling checkout of Grust.
+That import pulls in the core graph types and, because the dependency enables
+the `sail` feature, the `SailConfig` and `SailGraphStore` adapter types.
 
 ## Python LangChain-Style Tool Gating
 
@@ -797,10 +795,9 @@ story. Python code gets a subprocess oracle. That is weaker, but useful now. A
 future PyO3 crate could expose in-process policy checks, but the CLI boundary is
 easy to sandbox, inspect, and test.
 
-The published Grust integration also records a naming tradeoff. The ideal facade
-crate name, `grust`, is unavailable on crates.io for this project. The example
-therefore imports `grust-core` and `grust-sail` directly. That is explicit and
-works with the published packages.
+The published Grust integration also records a naming tradeoff. The package is
+published as `grust-graph`, but it exposes the facade library as `grust`, so
+examples can keep the natural `use grust::prelude::*` shape.
 
 # Roadmap
 

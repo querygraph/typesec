@@ -7,8 +7,7 @@
 
 use std::{net::TcpStream, sync::Arc};
 
-use grust_core::prelude::*;
-use grust_sail::{SailConfig, SailGraphStore};
+use grust::prelude::*;
 use typesec_agent::SecureAgent;
 use typesec_core::{
     Capability, Credentials, Resource,
@@ -202,7 +201,7 @@ fn inspect_sensitive_network(
 async fn persist_graph_to_sail(
     _cap: &Capability<CanWrite, CompanyGraphResource>,
     graph: &Graph,
-) -> grust_core::Result<()> {
+) -> grust::Result<()> {
     if TcpStream::connect("127.0.0.1:50051").is_err() {
         println!("Sail is not listening on 127.0.0.1:50051; skipping backend write.");
         return Ok(());

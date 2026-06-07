@@ -39,6 +39,7 @@ The `Capability<P, R>` struct is **unforgeable**:
 ## Architecture
 
 ```
+typesec           ← facade crate re-exporting the common API
 typesec-core      ← traits, phantom types, Capability, PolicyEngine, typestate
 typesec-rbac      ← YAML RBAC → runtime engine + codegen
 typesec-odrl      ← YAML ODRL → constraint evaluation + audit log
@@ -171,6 +172,19 @@ typesec run --policy policies/odrl-example.yaml \
 ---
 
 ## Quickstart
+
+```sh
+cargo add typesec
+```
+
+For the CLI:
+
+```sh
+cargo install typesec-cli
+typesec validate --policy policies/rbac-example.yaml
+```
+
+For local development:
 
 ```sh
 git clone <repo>

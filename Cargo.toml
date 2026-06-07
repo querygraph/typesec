@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/typesec",
     "crates/typesec-core",
     "crates/typesec-rbac",
     "crates/typesec-odrl",
@@ -14,7 +15,7 @@ version = "0.1.0"
 edition = "2024"
 authors = ["typesec contributors"]
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/example/typesec"
+repository = "https://github.com/alexy/typesec"
 
 [workspace.dependencies]
 # Async

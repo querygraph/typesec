@@ -2,6 +2,9 @@
 name = "typesec-cli"
 version.workspace = true
 edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
 description = "CLI for typesec — validate, check, generate, run"
 
 [[bin]]
@@ -21,10 +24,10 @@ name = "company_graph_grust_sail"
 path = "../../examples/company_graph/company_graph_grust_sail.rs"
 
 [dependencies]
-typesec-core = { path = "../typesec-core" }
-typesec-rbac = { path = "../typesec-rbac" }
-typesec-odrl = { path = "../typesec-odrl" }
-typesec-agent = { path = "../typesec-agent" }
+typesec-core = { version = "0.1.0", path = "../typesec-core" }
+typesec-rbac = { version = "0.1.0", path = "../typesec-rbac" }
+typesec-odrl = { version = "0.1.0", path = "../typesec-odrl" }
+typesec-agent = { version = "0.1.0", path = "../typesec-agent" }
 tokio = { workspace = true }
 clap = { workspace = true }
 serde = { workspace = true }
@@ -36,5 +39,4 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
-grust-core = "0.1.0"
-grust-sail = "0.1.0"
+grust-graph = { version = "0.1.0", features = ["sail"] }

@@ -2,6 +2,9 @@
 name = "typesec-core"
 version.workspace = true
 edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
 description = "Core trait library for type-level security enforcement"
 
 [dependencies]

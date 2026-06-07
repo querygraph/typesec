@@ -1,0 +1,22 @@
+[package]
+name = "typesec"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Type-level security capabilities for Rust agents"
+
+[features]
+default = ["agent", "rbac", "odrl", "macros"]
+agent = ["dep:typesec-agent"]
+rbac = ["dep:typesec-rbac"]
+odrl = ["dep:typesec-odrl"]
+macros = ["dep:typesec-macro"]
+
+[dependencies]
+typesec-core = { version = "0.1.0", path = "../typesec-core" }
+typesec-agent = { version = "0.1.0", path = "../typesec-agent", optional = true }
+typesec-rbac = { version = "0.1.0", path = "../typesec-rbac", optional = true }
+typesec-odrl = { version = "0.1.0", path = "../typesec-odrl", optional = true }
+typesec-macro = { version = "0.1.0", path = "../typesec-macro", optional = true }

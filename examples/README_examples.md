@@ -183,14 +183,13 @@ examples/company_graph/company_graph_grust_sail.rs
 This example uses published Grust crates:
 
 ```toml
-grust-core = "0.1.0"
-grust-sail = "0.1.0"
+grust-graph = { version = "0.1.0", features = ["sail"] }
 ```
 
-It builds a backend-neutral property graph with `grust-core`. If a Sail
+It builds a backend-neutral property graph through the `grust` facade. If a Sail
 SparkConnect server is listening on `127.0.0.1:50051`, it writes the graph
-through `grust-sail`; otherwise it skips the backend write and still exercises
-the Typesec policy checks.
+through the facade's Sail adapter exports; otherwise it skips the backend write
+and still exercises the Typesec policy checks.
 
 Run it:
 
