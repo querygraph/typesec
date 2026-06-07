@@ -1,8 +1,4 @@
 ---
-title: "Typesec"
-subtitle: "Type-Level Security for Agentic AI"
-author: "Alexy and Codex"
-date: "June 6, 2026"
 lang: en-US
 ---
 

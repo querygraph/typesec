@@ -5,13 +5,22 @@ cd "$(dirname "$0")/.."
 
 mkdir -p book/dist
 
+tmpdir="$(mktemp -d)"
+trap 'rm -rf "$tmpdir"' EXIT
+
+pandoc book/cover.md \
+  -o "$tmpdir/cover.pdf" \
+  --pdf-engine=typst
+
 pandoc book/typesec.md \
-  -o book/dist/typesec.pdf \
+  -o "$tmpdir/body.pdf" \
   --pdf-engine=typst \
   --toc \
   --number-sections
 
-pandoc book/typesec.md \
+pdfunite "$tmpdir/cover.pdf" "$tmpdir/body.pdf" book/dist/typesec.pdf
+
+pandoc book/cover.md book/typesec.md \
   -o book/dist/typesec.epub \
   --toc \
   --number-sections
