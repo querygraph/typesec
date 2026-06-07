@@ -34,9 +34,11 @@
 
 pub mod agent;
 pub mod executor;
+pub mod tool;
 
 pub use agent::{AgentBuilder, SecureAgent};
 pub use executor::TaskResult;
+pub use tool::{ProtectedTool, ToolFuture, ToolSpec};
 
 // Re-export core types for convenience.
 pub use typesec_core::{

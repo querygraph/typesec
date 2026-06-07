@@ -1,17 +1,18 @@
 [package]
-name = "typesec-odrl"
+name = "typesec-integrations"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "ODRL policy engine for typesec — W3C digital rights language subset"
+description = "OAuth, OIDC, WorkOS, and Arcade integrations for typesec"
 
 [dependencies]
 typesec-core = { version = "0.3.0", path = "../typesec-core" }
-serde = { workspace = true }
-serde_yaml = { workspace = true }
 chrono = { workspace = true }
+jsonwebtoken = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-glob = { workspace = true }

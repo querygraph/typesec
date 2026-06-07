@@ -8,9 +8,9 @@ repository.workspace = true
 description = "Agent executor with typestate and capability-based access control"
 
 [dependencies]
-typesec-core = { version = "0.2.1", path = "../typesec-core" }
-typesec-rbac = { version = "0.2.1", path = "../typesec-rbac" }
-typesec-odrl = { version = "0.2.1", path = "../typesec-odrl" }
+typesec-core = { version = "0.3.0", path = "../typesec-core" }
+typesec-rbac = { version = "0.3.0", path = "../typesec-rbac" }
+typesec-odrl = { version = "0.3.0", path = "../typesec-odrl" }
 tokio = { workspace = true }
 futures = { workspace = true }
 serde = { workspace = true }

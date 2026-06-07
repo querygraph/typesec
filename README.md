@@ -52,6 +52,7 @@ typesec-core      ← traits, phantom types, Capability, PolicyEngine, typestate
 typesec-rbac      ← YAML RBAC → runtime engine + codegen
 typesec-odrl      ← YAML ODRL → constraint evaluation + audit log
 typesec-agent     ← SecureAgent: authenticate + request_capability + execute
+typesec-integrations ← JWT/OIDC, WorkOS FGA, Arcade-style tool auth engines
 typesec-macro     ← #[derive(TypesecRole)], policy! macro
 typesec-cli       ← validate / check / generate / run commands
 typesec-python    ← PyO3 bindings for Rust-backed Python policy gates
@@ -149,6 +150,56 @@ agent.execute(&cap, &report, |r| Box::pin(async move {
 Engines can be composed: `AgentBuilder::with_composed_engine(odrl, rbac)` tries
 ODRL first, falls back to RBAC on delegation.
 
+### typesec-integrations
+
+OAuth proves identity and delegates authority. Typesec turns allowed provider
+decisions into typed capabilities that local code must hold before it can run.
+
+The optional `integrations` feature adds provider-facing adapters:
+
+- **`JwtAuthenticator`** verifies OIDC/JWT access tokens against JWKS.
+- **`JwtClaimsEngine`** allows fast org-wide permissions embedded in verified
+  token claims and delegates misses to a precise engine.
+- **`WorkOsFgaEngine`** calls WorkOS Fine-Grained Authorization for app
+  resources such as `project/proj_123`.
+- **`ArcadeToolAuthEngine`** checks whether a user has authorized an external
+  tool such as `Gmail.ListEmails`.
+- **`ProtectedTool`** wraps local tool handlers so invocation requires a
+  matching `Capability<P, R>`.
+
+The intended architecture is:
+
+```text
+OIDC/AuthKit token
+  -> JwtAuthenticator verifies identity
+  -> JwtClaimsEngine checks fast org-wide claims
+  -> WorkOsFgaEngine checks resource-scoped app access
+  -> ArcadeToolAuthEngine checks external SaaS tool authorization
+  -> Allow mints Capability<P, R>
+  -> ProtectedTool<P, R, _> can run
+```
+
+Representative composition:
+
+```rust
+let engine = PolicyEngineBuilder::new()
+    .add_engine(Arc::new(JwtClaimsEngine::from_permissions(
+        "user@example.com",
+        ["read".to_string()],
+    )))
+    .add_engine(Arc::new(WorkOsFgaEngine::new(workos_api_key)))
+    .add_engine(Arc::new(
+        ArcadeToolAuthEngine::new(arcade_api_key)
+            .with_tool_mapping("gmail/list", "Gmail.ListEmails"),
+    ))
+    .strategy(CombineStrategy::PriorityOrder)
+    .build();
+```
+
+See [`docs/typesec-and-auth-frameworks.md`](docs/typesec-and-auth-frameworks.md),
+[`docs/oauth-provider-integrations.md`](docs/oauth-provider-integrations.md), and
+[`examples/provider_integrations.rs`](examples/provider_integrations.rs).
+
 ### typesec-macro
 
 ```rust
@@ -208,6 +259,7 @@ cargo test
 cargo run -p typesec-cli -- validate --policy policies/rbac-example.yaml
 cargo run --example rbac_agent
 cargo run --example odrl_agent
+cargo run -p typesec-cli --example provider_integrations
 ```
 
 For Python examples and the Rust-backed Python module, use asdf for the Python

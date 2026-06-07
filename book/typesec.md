@@ -164,15 +164,18 @@ whether the proof should be minted.
 
 # Workspace Tour
 
-The repository is a Rust workspace with six crates:
+The repository is a Rust workspace with nine crates:
 
 ```text
+typesec           facade crate re-exporting the common API
 typesec-core      traits, phantom types, Capability, SecureValue, PolicyEngine, typestate
 typesec-rbac      YAML RBAC parser, validator, engine, and code generator
 typesec-odrl      YAML ODRL subset, constraints, prohibitions, and audit events
 typesec-agent     SecureAgent wrapper for async capability requests and execute
+typesec-integrations JWT/OIDC, WorkOS FGA, and Arcade-style tool auth engines
 typesec-macro     derive and policy macros for typed role declarations
 typesec-cli       validate, check, generate, and run commands
+typesec-python    PyO3 bindings for Rust-backed Python policy gates
 ```
 
 The repository also includes:
@@ -180,6 +183,7 @@ The repository also includes:
 ```text
 examples/rbac_agent.rs
 examples/odrl_agent.rs
+examples/provider_integrations.rs
 examples/company_graph/company_graph_grust_sail.rs
 examples/company_graph/langchain_company_graph.py
 policies/rbac-example.yaml
@@ -187,6 +191,8 @@ policies/odrl-example.yaml
 docs/company-graph-grust-sail.md
 docs/david-andrzejewski-scale-by-the-bay-2018-transcript.md
 docs/improvements.md
+docs/oauth-provider-integrations.md
+docs/typesec-and-auth-frameworks.md
 docs/typesec-claude1.md
 tests/python/test_cli_policy.py
 ```
@@ -194,7 +200,7 @@ tests/python/test_cli_policy.py
 The root workspace uses Rust 2024. Common dependencies are declared in
 `[workspace.dependencies]`: `tokio`, `serde`, `serde_yaml`, `serde_json`,
 `clap`, `tracing`, `thiserror`, `anyhow`, `syn`, `quote`, `proc-macro2`, and
-`glob`.
+`glob`, `jsonwebtoken`, and `reqwest`.
 
 One important dependency change happened late in the day. The local example had
 originally depended on a path checkout of Grust:
@@ -441,6 +447,222 @@ DenyOverrides   any deny beats any allow
 useful when a more specific policy should get the first chance to decide and
 fall back to a broader one only on delegation.
 
+# OAuth, Arcade, WorkOS, and Typesec
+
+Typesec is not an OAuth replacement. That point matters because the modern
+agent-security stack already has strong identity and delegation systems. OAuth,
+OIDC, AuthKit, WorkOS, Arcade, and provider-specific consent flows all solve
+real problems that Typesec should not try to reimplement.
+
+The better architecture is layered:
+
+```text
+OAuth/OIDC proves identity and delegates external authority
+WorkOS models enterprise users, organizations, sessions, RBAC, and FGA
+Arcade manages agent-facing OAuth/tool authorization for SaaS tools
+Typesec converts allowed decisions into typed local capabilities
+```
+
+This comparison is also recorded in
+`docs/typesec-and-auth-frameworks.md`. The short version is:
+
+> OAuth proves and delegates identity. Typesec turns authorization decisions
+> into compile-time-visible authority inside agent/tool code.
+
+## The Comparison
+
+The systems operate at different layers:
+
+```text
+Typesec   code-level enforcement for agent/tool execution
+Arcade    MCP/tool runtime and delegated user auth for external services
+WorkOS    identity, OAuth apps, RBAC/FGA, enterprise auth infrastructure
+```
+
+Typesec's core primitive is `Capability<P, R>` plus typestate
+`Agent<Authenticated>`. Arcade's core runtime primitive is a user-specific tool
+authorization and managed OAuth/API-key token state. WorkOS's primitives are
+OAuth/OIDC tokens, organization claims, roles, permissions, and FGA access
+checks.
+
+That gives each system a natural strength:
+
+```text
+Use WorkOS when you need enterprise login, SSO, organizations, RBAC, IdP sync,
+and resource-scoped FGA for application objects.
+
+Use Arcade when an agent needs to act as a user inside external SaaS systems
+such as Gmail, Slack, GitHub, Jira, or Google Drive.
+
+Use Typesec when local tool code must not run unless the program holds a typed
+proof that authorization already happened.
+```
+
+Arcade and WorkOS still return runtime facts. A token verifies. A consent flow
+completes. An authorization API returns `authorized: true`. Those facts are
+important, but ordinary application code can still ignore them unless every
+call site is disciplined. Typesec adds the local last mile: the handler is
+written to require a typed capability, so the call cannot be made by accident.
+
+## What Arcade Does
+
+Arcade is closest to the agent-tool problem. It handles OAuth 2.0, API keys,
+and user tokens for tools. In an agent setting, that means a user can authorize
+Gmail once, Arcade can store and refresh the provider tokens, and an agent can
+later call a Gmail tool on that user's behalf without the model seeing secrets.
+
+Arcade also separates two boundaries:
+
+```text
+resource-server auth  protects access to the MCP server or gateway
+tool-level auth       authorizes the specific third-party tool call
+```
+
+That distinction maps cleanly to Typesec. Arcade can answer:
+
+```text
+Has user@example.com authorized Gmail.ListEmails?
+```
+
+Typesec can then mint:
+
+```rust
+Capability<CanExecute, GenericResource>
+```
+
+where the resource id is `Gmail.ListEmails` or a local alias such as
+`gmail/list`.
+
+The repository's `ArcadeToolAuthEngine` is intentionally small. It maps a local
+resource id to an Arcade tool name, asks the configured Arcade endpoint whether
+the user's authorization is complete, and returns `PolicyResult::Allow` only
+when the provider response is complete. Pending authorization is a denial with
+the provider URL included when available.
+
+```rust
+let arcade = ArcadeToolAuthEngine::new(arcade_api_key)
+    .with_tool_mapping("gmail/list", "Gmail.ListEmails");
+
+let gmail = GenericResource::new("gmail/list", "tool");
+let cap: Capability<CanExecute, GenericResource> =
+    agent.request_capability(&gmail).await?;
+```
+
+The important design choice is that Arcade remains the OAuth/tool runtime, while
+Typesec remains the local proof system. Arcade knows how to complete OAuth.
+Typesec knows how to make the local tool handler require proof.
+
+## What WorkOS Does
+
+WorkOS is broader enterprise auth infrastructure. AuthKit and Connect cover
+login, OAuth applications, SSO, user sessions, organizations, token issuance,
+and token verification. WorkOS Fine-Grained Authorization extends RBAC into a
+hierarchical, resource-scoped model for application objects such as
+organizations, workspaces, projects, and apps.
+
+For Typesec, the useful WorkOS split is:
+
+```text
+JWT claims     fast checks for org-wide roles and permissions
+FGA API        precise checks for a specific action on a specific resource
+```
+
+That split fits Typesec's existing policy-composition model. The token can be
+verified once and converted into a `JwtClaimsEngine`. The JWT engine can allow
+obvious org-wide permissions and delegate everything else. The WorkOS engine can
+then call the Authorization API for resource-specific checks.
+
+```rust
+let jwt_engine = Arc::new(JwtClaimsEngine::from_permissions(
+    "user@example.com",
+    ["org:view".to_string()],
+));
+
+let workos_engine = Arc::new(WorkOsFgaEngine::new(workos_api_key));
+
+let engine = PolicyEngineBuilder::new()
+    .add_engine(jwt_engine)
+    .add_engine(workos_engine)
+    .strategy(CombineStrategy::PriorityOrder)
+    .build();
+```
+
+Typesec resource ids use a simple convention for WorkOS FGA:
+
+```text
+project/proj_123
+workspace/ws_123
+```
+
+`WorkOsFgaEngine` parses the prefix as the resource type slug and the suffix as
+the external resource id. A `write` capability request on `project/proj_123`
+becomes a WorkOS-style permission check for `project:write` on that resource.
+
+## The Integrative Architecture
+
+The `typesec-integrations` crate puts these ideas behind the same
+`PolicyEngine` trait used by RBAC, ODRL, and graph policies.
+
+```text
+OIDC/AuthKit access token
+  -> JwtAuthenticator verifies signature, issuer, audience, expiry
+  -> VerifiedSubject becomes the authenticated Typesec subject
+
+Capability request
+  -> JwtClaimsEngine handles fast org-wide permissions
+  -> WorkOsFgaEngine handles app resource permissions
+  -> ArcadeToolAuthEngine handles external SaaS tool authorization
+  -> PolicyResult::Allow
+  -> Capability<P, R>
+  -> ProtectedTool<P, R, _> can run
+```
+
+Representative setup from `examples/provider_integrations.rs` looks like this:
+
+```rust
+let engine = PolicyEngineBuilder::new()
+    .add_engine(Arc::new(JwtClaimsEngine::from_permissions(
+        "user@example.com",
+        ["read".to_string()],
+    )))
+    .add_engine(Arc::new(WorkOsFgaEngine::new(workos_api_key)))
+    .add_engine(Arc::new(
+        ArcadeToolAuthEngine::new(arcade_api_key)
+            .with_tool_mapping("gmail/list", "Gmail.ListEmails"),
+    ))
+    .strategy(CombineStrategy::PriorityOrder)
+    .build();
+```
+
+Then local tool code can be shaped around the capability:
+
+```rust
+fn gmail_list(_resource: &GenericResource) -> ToolFuture<'_> {
+    Box::pin(async {
+        // Call the actual MCP/Arcade/Gmail implementation here.
+        Ok(())
+    })
+}
+
+let resource = GenericResource::new("gmail/list", "tool");
+let tool = ProtectedTool::<CanExecute, _, _>::new(
+    "gmail.list",
+    "List email messages",
+    resource,
+    gmail_list,
+);
+
+let cap: Capability<CanExecute, GenericResource> =
+    agent.request_capability(&GenericResource::new("gmail/list", "tool")).await?;
+
+tool.invoke(&agent, &cap).await?;
+```
+
+This is the central integration claim. WorkOS can say who the user is and what
+app resource they can access. Arcade can say whether the user authorized the
+external SaaS tool. Typesec can make the local implementation impossible to
+invoke without carrying that authorization as a typed proof.
+
 # `typesec-agent`
 
 `typesec-core` stays dependency-light. It does not need `tokio`. The
@@ -468,8 +690,78 @@ execute(&self, cap: &Capability<P, R>, resource: &R, action)
 
 The `execute` method captures the project's main ergonomic pattern. It takes a
 capability reference and a resource reference, logs the execution, and then runs
-an async closure. The closure cannot be reached through this method without a
-capability.
+the action. The newer `ProtectedTool` wrapper applies the same idea to
+agent-tool and MCP-style handlers: the tool advertises a required permission and
+resource, and `invoke` requires the matching `Capability<P, R>`.
+
+```rust
+let tool = ProtectedTool::<CanExecute, _, _>::new(
+    "gmail.list",
+    "List Gmail messages",
+    GenericResource::new("gmail/list", "tool"),
+    gmail_list,
+);
+
+tool.invoke(&agent, &execute_cap).await?;
+```
+
+The underlying `execute` method runs an async closure. The closure cannot be
+reached through this method without a capability.
+
+# `typesec-integrations`
+
+The integrations crate is intentionally outside `typesec-core`. Provider
+adapters need HTTP clients, JWT validation, provider-specific endpoints, and
+credential handling. The core crate should not own those dependencies.
+
+The crate currently contains four modules:
+
+```text
+http     small injectable JSON HTTP client abstraction
+jwt      OIDC/JWT verification and JWT-claims policy engine
+workos   WorkOS FGA policy engine
+arcade   Arcade-style tool authorization policy engine
+```
+
+The `http` module provides `ReqwestHttpClient` for production use plus
+`StaticHttpClient` and `RecordingHttpClient` for tests and examples. This lets
+the example exercise provider-like behavior without real credentials:
+
+```rust
+let workos_http = StaticHttpClient::new().with_response(
+    "https://api.workos.test/authorization/organization_memberships/user@example.com/check",
+    json!({ "authorized": true }),
+);
+```
+
+The JWT module has two layers. `JwtAuthenticator` validates a token against a
+JWKS endpoint, issuer, audience, algorithm list, and expiry. Once a token is
+verified, `VerifiedSubject` carries the subject, organization id, membership
+id, role, and permissions. `JwtClaimsEngine` then acts as a fast policy engine
+for permissions already embedded in the token.
+
+The WorkOS module translates a Typesec resource id into a WorkOS FGA check.
+For example:
+
+```text
+resource: project/proj_123
+action:   write
+check:    project:write on project/proj_123
+```
+
+The Arcade module handles external tool authorization. It maps local resource
+ids to Arcade tool names and only allows execution when the provider reports a
+completed authorization:
+
+```rust
+let arcade = ArcadeToolAuthEngine::new(arcade_api_key)
+    .with_tool_mapping("gmail/list", "Gmail.ListEmails");
+```
+
+These engines are not special cases in the capability system. They implement
+the same `PolicyEngine` trait as RBAC, ODRL, and graph policies. That is the
+point: external OAuth and enterprise authorization decisions become ordinary
+inputs to `mint_capability`.
 
 This pattern is small enough to be adopted by application code directly. A
 database write wrapper can require a write capability. A vector-store retrieval
@@ -647,9 +939,9 @@ codes, but parsing stdout is not ideal for long-term integrations.
 
 # Examples
 
-Typesec includes examples at three layers: pure Rust RBAC, pure Rust ODRL, and
-company-graph integrations that show how an agent tool boundary might look in a
-larger system.
+Typesec includes examples at several layers: pure Rust RBAC, pure Rust ODRL,
+OAuth-provider integration, and company-graph integrations that show how an
+agent tool boundary might look in a larger system.
 
 ## RBAC Agent
 
@@ -673,6 +965,44 @@ The ODRL example demonstrates contextual policy. Purpose matters. A read for
 analytics may be allowed while a read for billing delegates or denies. An
 exfiltration action can be prohibited even if a different action on the same
 target is allowed.
+
+## OAuth Provider Integrations
+
+The provider integration example is the concrete demonstration of the Arcade
+and WorkOS architecture described above. It does not require live provider
+credentials. Instead, it uses `StaticHttpClient` to stand in for WorkOS and
+Arcade responses while still exercising the same policy-engine and
+capability-minting path.
+
+Run it with:
+
+```sh
+cargo run -p typesec-cli --example provider_integrations
+```
+
+The example composes three engines:
+
+```rust
+let engine = PolicyEngineBuilder::new()
+    .add_engine(jwt_claims)
+    .add_engine(workos)
+    .add_engine(arcade)
+    .strategy(CombineStrategy::PriorityOrder)
+    .build();
+```
+
+The flow demonstrates three grants:
+
+```text
+read org/acme              allowed from JWT claims
+write project/proj_123     delegated to mocked WorkOS FGA
+execute Gmail.ListEmails   delegated to mocked Arcade tool auth
+```
+
+The final step invokes a `ProtectedTool<CanExecute, _, _>`. That is the key
+piece of the example: after the provider engines allow the tool execution,
+Typesec still requires the local tool implementation to receive the typed
+execute capability before it can run.
 
 ## Company Graph with Grust and Sail
 
@@ -756,13 +1086,18 @@ tests cover allowed purpose, wrong purpose, prohibition, and delegation for
 unknown subjects.
 
 Integration tests in `crates/typesec-agent/tests/integration.rs` exercise the
-agent layer across more realistic scenarios. Python smoke tests in
+agent layer across more realistic scenarios. Provider integration tests in
+`crates/typesec-integrations/tests/provider_composition.rs` check the public
+WorkOS, Arcade, JWT, and capability-composition path. Python smoke tests in
 `tests/python/test_cli_policy.py` exercise the CLI as a policy oracle.
 
 During today's final publishing pass, the merged repository was checked with:
 
 ```sh
 cargo check --workspace
+cargo test --workspace
+cargo check -p typesec-cli --example provider_integrations
+cargo run -q -p typesec-cli --example provider_integrations
 ```
 
 When the Grust dependency was switched from a path dependency to published
@@ -772,7 +1107,7 @@ crates, the Grust/Sail example was checked separately:
 cargo check --example company_graph_grust_sail
 ```
 
-Both passed.
+All passed.
 
 # What We Improved
 
@@ -795,6 +1130,19 @@ The company graph examples were added to show Typesec at an application
 boundary, not just inside small unit tests. The Rust version proves the typed
 capability story with Grust. The Python version proves that the CLI can gate
 side-effecting tools in a LangChain-like shape.
+
+The provider integration layer was added to show how Typesec fits under
+OAuth-based systems instead of replacing them. `JwtAuthenticator`,
+`JwtClaimsEngine`, `WorkOsFgaEngine`, and `ArcadeToolAuthEngine` all feed the
+same `PolicyEngine` boundary. `ProtectedTool` then demonstrates the local last
+mile: provider authorization is not merely observed; it becomes a typed
+capability required by the handler.
+
+The new comparison document,
+`docs/typesec-and-auth-frameworks.md`, explains the strategic position:
+WorkOS handles enterprise identity and resource authorization, Arcade handles
+agent-oriented SaaS tool authorization, and Typesec makes the resulting local
+authority impossible to forget at the call site.
 
 Finally, the Grust crates were switched from a local path dependency to
 published crates.io packages, making the example reproducible outside this
@@ -833,6 +1181,13 @@ easy to sandbox, inspect, and test.
 The published Grust integration also records a naming tradeoff. The package is
 published as `grust-graph`, but it exposes the facade library as `grust`, so
 examples can keep the natural `use grust::prelude::*` shape.
+
+The OAuth provider integration records a different tradeoff. Typesec should not
+be a token vault, a hosted IdP, or a full MCP runtime. The integration crate
+therefore uses small provider-specific policy engines and injectable HTTP
+clients. That keeps provider decisions at the edge while preserving the core
+invariant: only an allow through `PolicyEngine` can mint the capability that
+local code requires.
 
 The new `SecureValue` API is another compromise. It brings information-flow
 style labeled data into the Rust workspace without pretending to be a full
@@ -888,7 +1243,12 @@ against a known local service profile. The current example gracefully skips Sail
 when it is not listening; a fuller demo could include setup instructions or a
 containerized path.
 
-Eighth, extend `SecureValue` beyond the built-in four-label lattice. The current
+Eighth, add live provider smoke tests behind environment variables. The current
+WorkOS and Arcade tests use deterministic mocked HTTP clients, which is right
+for CI. A separate ignored test profile could verify a real WorkOS sandbox and
+a real Arcade project when credentials are present.
+
+Ninth, extend `SecureValue` beyond the built-in four-label lattice. The current
 labels are `Public`, `Internal`, `Sensitive`, and `Secret`. Domain-specific
 deployments may want generated labels from policy files, capability-bound
 declassification reasons, or audited release records that carry policy version
@@ -914,6 +1274,8 @@ RBAC policy evaluation
 ODRL contextual policy and prohibitions
 policy combinators
 async secure agents
+OAuth/OIDC provider integrations
+WorkOS FGA and Arcade-style tool auth engines
 CLI policy checks
 Rust examples
 Python tool-gating example
@@ -923,8 +1285,9 @@ tests and documentation
 
 The design is not finished, but it is real enough to build on. The next work is
 to make the compile-time guarantees more aggressively tested, make generated
-policy types part of ordinary workflows, and give non-Rust agents cleaner ways
-to use the same security boundary.
+policy types part of ordinary workflows, connect the provider adapters to live
+sandbox environments, and give non-Rust agents cleaner ways to use the same
+security boundary.
 
 That is the arc of today's build: from an idea about impossible-to-forget
 authorization, to a working Rust workspace, to examples that show how agent

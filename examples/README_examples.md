@@ -156,6 +156,36 @@ Check that it still compiles:
 cargo check -p typesec-cli --example odrl_agent
 ```
 
+## `provider_integrations.rs`
+
+Path:
+
+```text
+examples/provider_integrations.rs
+```
+
+This Rust example demonstrates the OAuth-provider integration path without
+requiring live provider credentials. It uses mocked HTTP clients to show:
+
+1. JWT/OIDC claims granting a fast org-wide capability.
+2. WorkOS FGA granting a resource-scoped app capability.
+3. Arcade-style tool authorization granting an external tool execution
+   capability.
+4. `ProtectedTool` refusing to invoke unless the matching typed capability is
+   supplied.
+
+Run it:
+
+```sh
+cargo run -p typesec-cli --example provider_integrations
+```
+
+Check that it still compiles:
+
+```sh
+cargo check -p typesec-cli --example provider_integrations
+```
+
 ## Company Graph Examples
 
 Directory:

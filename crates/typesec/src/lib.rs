@@ -34,8 +34,18 @@ pub mod macros {
     pub use typesec_macro::*;
 }
 
+/// OAuth/OIDC and provider integrations.
+#[cfg(feature = "integrations")]
+pub mod integrations {
+    pub use typesec_integrations::*;
+}
+
 #[cfg(feature = "agent")]
 pub use typesec_agent::{AgentBuilder, SecureAgent, TaskResult};
+#[cfg(feature = "integrations")]
+pub use typesec_integrations::{
+    ArcadeToolAuthEngine, JwtAuthenticator, JwtClaimsEngine, OidcConfig, WorkOsFgaEngine,
+};
 #[cfg(feature = "odrl")]
 pub use typesec_odrl::OdrlEngine;
 #[cfg(feature = "rbac")]

@@ -23,11 +23,15 @@ path = "../../examples/odrl_agent.rs"
 name = "company_graph_grust_sail"
 path = "../../examples/company_graph/company_graph_grust_sail.rs"
 
+[[example]]
+name = "provider_integrations"
+path = "../../examples/provider_integrations.rs"
+
 [dependencies]
-typesec-core = { version = "0.2.1", path = "../typesec-core" }
-typesec-rbac = { version = "0.2.1", path = "../typesec-rbac" }
-typesec-odrl = { version = "0.2.1", path = "../typesec-odrl" }
-typesec-agent = { version = "0.2.1", path = "../typesec-agent" }
+typesec-core = { version = "0.3.0", path = "../typesec-core" }
+typesec-rbac = { version = "0.3.0", path = "../typesec-rbac" }
+typesec-odrl = { version = "0.3.0", path = "../typesec-odrl" }
+typesec-agent = { version = "0.3.0", path = "../typesec-agent" }
 tokio = { workspace = true }
 clap = { workspace = true }
 serde = { workspace = true }
@@ -40,3 +44,4 @@ tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
 grust-graph = { workspace = true, features = ["sail"] }
+typesec-integrations = { version = "0.3.0", path = "../typesec-integrations" }
