@@ -1,0 +1,21 @@
+[package]
+name = "typesec-python"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Rust-backed Python bindings for Typesec policy checks"
+
+[lib]
+name = "typesec_native"
+crate-type = ["cdylib"]
+
+[features]
+extension-module = ["pyo3/extension-module"]
+
+[dependencies]
+typesec-core = { version = "0.2.1", path = "../typesec-core" }
+typesec-rbac = { version = "0.2.1", path = "../typesec-rbac" }
+typesec-odrl = { version = "0.2.1", path = "../typesec-odrl" }
+pyo3 = { workspace = true }

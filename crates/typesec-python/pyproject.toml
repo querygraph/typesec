@@ -1,0 +1,15 @@
+[build-system]
+requires = ["maturin>=1.8,<2"]
+build-backend = "maturin"
+
+[project]
+name = "typesec-native"
+version = "0.2.1"
+description = "Rust-backed Python bindings for Typesec policy checks"
+requires-python = ">=3.10"
+license = "MIT OR Apache-2.0"
+authors = [{ name = "typesec contributors" }]
+
+[tool.maturin]
+module-name = "typesec_native"
+features = ["extension-module"]

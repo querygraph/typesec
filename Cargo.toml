@@ -8,6 +8,7 @@ members = [
     "crates/typesec-agent",
     "crates/typesec-macro",
     "crates/typesec-cli",
+    "crates/typesec-python",
 ]
 
 [workspace.package]
@@ -40,6 +41,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 # Error handling
 thiserror = "1"
 anyhow = "1"
+pyo3 = "0.25"
 
 # Proc-macro utilities
 syn = { version = "2", features = ["full"] }

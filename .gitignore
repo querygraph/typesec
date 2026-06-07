@@ -6,3 +6,4 @@ Cargo.lock
 src/policy_gen.rs
 __pycache__/
 *.py[cod]
+.venv/

@@ -232,13 +232,20 @@ examples/company_graph/langchain_company_graph.py
 ```
 
 This script does not require LangChain and does not call an LLM. It mirrors the
-shape of a LangChain tool wrapper: before a tool mutates the graph, it shells
-out to `typesec check` through the workspace CLI.
+shape of a LangChain tool wrapper while keeping all reusable policy and graph
+logic in:
+
+```text
+examples/company_graph/company_graph_core.py
+```
+
+The shared `TypesecGate` tries the Rust-backed `typesec_native` Python module
+first and falls back to `typesec check` through the workspace CLI.
 
 Run it with the installed CLI available for comparison:
 
 ```sh
-python3 examples/company_graph/langchain_company_graph.py
+uv run python examples/company_graph/langchain_company_graph.py
 ```
 
 The script itself invokes:
@@ -249,6 +256,47 @@ cargo run -q -p typesec-cli -- check ...
 
 so it also works before `cargo install` as long as it is launched from a working
 Rust checkout.
+
+### Python Pydantic AI Tool Gate
+
+Path:
+
+```text
+examples/company_graph/pydantic_company_graph.py
+```
+
+This example uses Pydantic AI's standard `deps_type` and `RunContext` hooks. No
+Pydantic fork is required: tools receive `CompanyGraphDeps`, call
+`TypesecGate.arequire(...)`, and only then mutate the shared graph.
+
+Run the deterministic tool-boundary smoke path:
+
+```sh
+uv run python examples/company_graph/pydantic_company_graph.py
+```
+
+If `pydantic-ai` is installed, the same file also defines a real
+`company_graph_agent` with secured tools.
+
+### Rust-Backed Python Package
+
+Path:
+
+```text
+crates/typesec-python/
+```
+
+The PyO3 module exposes `typesec_native.TypesecGate`, `Decision`, `check`, and
+`validate`. Build a local development wheel with:
+
+```sh
+cd crates/typesec-python
+uv sync --group dev
+uv run maturin develop
+```
+
+The source examples do not require this wheel; they use it automatically when
+available and otherwise fall back to the CLI.
 
 ## Generate Typed RBAC Code
 
@@ -284,5 +332,7 @@ cargo test --workspace
 cargo check -p typesec-cli --example rbac_agent
 cargo check -p typesec-cli --example odrl_agent
 cargo check -p typesec-cli --example company_graph_grust_sail
-python3 examples/company_graph/langchain_company_graph.py
+uv run python examples/company_graph/langchain_company_graph.py
+uv run python examples/company_graph/pydantic_company_graph.py
+uv run python -m unittest discover -s tests/python
 ```

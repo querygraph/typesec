@@ -54,6 +54,7 @@ typesec-odrl      ← YAML ODRL → constraint evaluation + audit log
 typesec-agent     ← SecureAgent: authenticate + request_capability + execute
 typesec-macro     ← #[derive(TypesecRole)], policy! macro
 typesec-cli       ← validate / check / generate / run commands
+typesec-python    ← PyO3 bindings for Rust-backed Python policy gates
 ```
 
 ### typesec-core
@@ -209,8 +210,23 @@ cargo run --example rbac_agent
 cargo run --example odrl_agent
 ```
 
+For Python examples and the Rust-backed Python module, use asdf for the Python
+version and uv for the virtualenv/dependencies:
+
+```sh
+asdf install
+uv venv --python "$(asdf which python)"
+uv sync --group dev
+uv run python --version
+```
+
 For the full example catalog, install commands, and run commands, see
 [`examples/README_examples.md`](examples/README_examples.md).
+
+For Python agents, the company graph examples include a framework-neutral
+Typesec gate, a LangChain-style adapter, and a Pydantic AI adapter. The native
+Python module lives in `crates/typesec-python` and can be built with maturin as
+`typesec_native`.
 
 ---
 

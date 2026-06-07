@@ -4,7 +4,8 @@ This example models agents writing a company hierarchy graph while Typesec gates
 which nodes and relationships each agent may touch.
 
 - Rust + Grust + Sail: `cargo run -p typesec-cli --example company_graph_grust_sail`
-- Python LangChain-style wrapper: `python3 examples/company_graph/langchain_company_graph.py`
+- Python LangChain-style wrapper: `uv run python examples/company_graph/langchain_company_graph.py`
+- Python Pydantic AI wrapper: `uv run python examples/company_graph/pydantic_company_graph.py`
 - Graph policy: `policies/graph-corporate-example.yaml`
 
 The generated network is:
@@ -50,7 +51,12 @@ Sail SparkConnect is listening on `127.0.0.1:50051`, it writes the graph through
 `SailGraphStore`; otherwise it skips the backend write and still demonstrates the
 security checks.
 
-The Python example is self-contained. It follows LangChain's tool-gating shape:
-each graph-writing tool call first asks `typesec check` whether the agent has the
-required policy capability. A denied decision raises `PermissionError` before the
-tool body can mutate the graph.
+The Python examples share `company_graph_core.py`, which owns the in-memory
+graph, employee fixture data, and `TypesecGate`. The gate tries the Rust-backed
+`typesec_native` module first and falls back to the workspace CLI, so examples
+can run from a checkout before the Python wheel is built.
+
+The LangChain-style example is now just a thin adapter over that core. The
+Pydantic AI example registers typed tools with `deps_type`/`RunContext`; each
+tool asks Typesec for permission before mutating the graph. This uses Pydantic's
+normal extension points and does not require forking Pydantic.

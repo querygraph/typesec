@@ -2,7 +2,7 @@
 
 Run from the repository root with:
 
-    python3 -m unittest discover -s tests/python
+    uv run python -m unittest discover -s tests/python
 
 These tests intentionally use only the Python standard library. They model the
 same integration seam a LangChain tool or Python REPL experiment would use:
