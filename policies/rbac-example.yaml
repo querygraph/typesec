@@ -1,0 +1,67 @@
+# RBAC Policy Example — typesec
+#
+# This file defines roles, their permissions, the resources they apply to,
+# and which subjects (agents) are assigned which roles.
+#
+# Role inheritance is supported: `admin` inherits all permissions from
+# `analyst` and `engineer`, plus adds its own.
+#
+# Resource patterns use glob syntax: `reports/*` matches `reports/q1`,
+# `reports/annual`, etc. `*` matches everything.
+
+roles:
+  - name: analyst
+    permissions:
+      - read
+      - read_sensitive
+    resources:
+      - "reports/*"
+      - "metrics/*"
+      - "dashboards/*"
+
+  - name: engineer
+    permissions:
+      - read
+      - write
+      - execute
+    resources:
+      - "code/*"
+      - "infra/*"
+      - "builds/*"
+
+  - name: ai_reader
+    permissions:
+      - read
+      - ai:infer
+    resources:
+      - "datasets/*"
+      - "models/*"
+
+  - name: admin
+    inherits:
+      - analyst
+      - engineer
+      - ai_reader
+    permissions:
+      - delete
+      - delegate
+      - write_sensitive
+    resources:
+      - "*"
+
+assignments:
+  - subject: "agent:data-pipeline"
+    roles:
+      - analyst
+
+  - subject: "agent:deploy-bot"
+    roles:
+      - engineer
+
+  - subject: "agent:summarizer"
+    roles:
+      - ai_reader
+
+  - subject: "agent:superadmin"
+    roles:
+      - admin

@@ -1,0 +1,53 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/typesec-core",
+    "crates/typesec-rbac",
+    "crates/typesec-odrl",
+    "crates/typesec-agent",
+    "crates/typesec-macro",
+    "crates/typesec-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["typesec contributors"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/example/typesec"
+
+[workspace.dependencies]
+# Async
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+serde_json = "1"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Logging / tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+# Error handling
+thiserror = "1"
+anyhow = "1"
+
+# Proc-macro utilities
+syn = { version = "2", features = ["full"] }
+quote = "1"
+proc-macro2 = "1"
+
+# Glob matching for resource patterns
+glob = "0.3"
+
+[profile.release]
+lto = true
+codegen-units = 1

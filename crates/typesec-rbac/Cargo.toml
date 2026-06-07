@@ -1,0 +1,13 @@
+[package]
+name = "typesec-rbac"
+version.workspace = true
+edition.workspace = true
+description = "RBAC policy engine for typesec — YAML → typed enforcement"
+
+[dependencies]
+typesec-core = { path = "../typesec-core" }
+serde = { workspace = true }
+serde_yaml = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+glob = { workspace = true }

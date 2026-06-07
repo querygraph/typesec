@@ -1,0 +1,77 @@
+# ODRL Policy Example — typesec
+#
+# ODRL (Open Digital Rights Language, W3C) models permissions, prohibitions,
+# and duties with runtime constraints. This is more expressive than RBAC:
+# a permission can be conditional on purpose, time window, count, etc.
+#
+# Conflict resolution: prohibitions take precedence over permissions.
+# If both a permission and a prohibition match, the action is denied.
+#
+# The `exfiltrate` prohibition at the bottom is unconditional — it applies
+# regardless of constraints. This is the safety net that prevents any
+# agent from exfiltrating customer data, even if they somehow obtained a
+# read permission on it.
+
+policies:
+  - uid: "policy:ai-agent-analytics"
+    type: Set
+    rules:
+      # Summarizer may read customer data, but only for analytics purposes
+      # and only until end of 2026.
+      - type: permission
+        assigner: "org:acme"
+        assignee: "agent:summarizer"
+        action: read
+        target: "asset:customer-data"
+        constraints:
+          - leftOperand: purpose
+            operator: eq
+            rightOperand: "analytics"
+          - leftOperand: dateTime
+            operator: lt
+            rightOperand: "2027-01-01T00:00:00Z"
+
+      # Summarizer may run inference on customer data for any allowed purpose.
+      - type: permission
+        assigner: "org:acme"
+        assignee: "agent:summarizer"
+        action: "ai:infer"
+        target: "asset:customer-data"
+        constraints:
+          - leftOperand: purpose
+            operator: isPartOf
+            rightOperand: "analytics, audit, reporting"
+
+      # Absolute prohibition: the summarizer must NEVER exfiltrate customer data.
+      # No constraints — this prohibition is always active.
+      - type: prohibition
+        assignee: "agent:summarizer"
+        action: exfiltrate
+        target: "asset:customer-data"
+
+  - uid: "policy:training-agent"
+    type: Set
+    rules:
+      # Training agent may read model artifacts.
+      - type: permission
+        assigner: "org:acme"
+        assignee: "agent:trainer"
+        action: read
+        target: "asset:model-artifacts"
+
+      # Training agent may train on curated datasets.
+      - type: permission
+        assigner: "org:acme"
+        assignee: "agent:trainer"
+        action: "ai:train"
+        target: "asset:curated-datasets"
+        constraints:
+          - leftOperand: purpose
+            operator: eq
+            rightOperand: "model-improvement"
+
+      # Training agent must not read raw PII.
+      - type: prohibition
+        assignee: "agent:trainer"
+        action: read
+        target: "asset:raw-pii"

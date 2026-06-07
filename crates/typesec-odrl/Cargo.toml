@@ -1,0 +1,14 @@
+[package]
+name = "typesec-odrl"
+version.workspace = true
+edition.workspace = true
+description = "ODRL policy engine for typesec — W3C digital rights language subset"
+
+[dependencies]
+typesec-core = { path = "../typesec-core" }
+serde = { workspace = true }
+serde_yaml = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+glob = { workspace = true }

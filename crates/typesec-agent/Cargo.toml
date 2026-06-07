@@ -1,0 +1,19 @@
+[package]
+name = "typesec-agent"
+version.workspace = true
+edition.workspace = true
+description = "Agent executor with typestate and capability-based access control"
+
+[dependencies]
+typesec-core = { path = "../typesec-core" }
+typesec-rbac = { path = "../typesec-rbac" }
+typesec-odrl = { path = "../typesec-odrl" }
+tokio = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tracing-subscriber = { workspace = true }
+chrono = { workspace = true }

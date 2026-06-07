@@ -1,0 +1,40 @@
+[package]
+name = "typesec-cli"
+version.workspace = true
+edition.workspace = true
+description = "CLI for typesec — validate, check, generate, run"
+
+[[bin]]
+name = "typesec"
+path = "src/main.rs"
+
+[[example]]
+name = "rbac_agent"
+path = "../../examples/rbac_agent.rs"
+
+[[example]]
+name = "odrl_agent"
+path = "../../examples/odrl_agent.rs"
+
+[[example]]
+name = "company_graph_grust_sail"
+path = "../../examples/company_graph_grust_sail.rs"
+
+[dependencies]
+typesec-core = { path = "../typesec-core" }
+typesec-rbac = { path = "../typesec-rbac" }
+typesec-odrl = { path = "../typesec-odrl" }
+typesec-agent = { path = "../typesec-agent" }
+tokio = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+grust-core = "0.1.0"
+grust-sail = "0.1.0"
