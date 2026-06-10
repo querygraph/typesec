@@ -11,7 +11,7 @@ description = "Procedural macros for typesec — derive(TypesecRole) and policy!
 proc-macro = true
 
 [dependencies]
-typesec-core = { version = "0.3.0", path = "../typesec-core" }
+typesec-core = { version = "0.4.0", path = "../typesec-core" }
 syn = { workspace = true }
 quote = { workspace = true }
 proc-macro2 = { workspace = true }

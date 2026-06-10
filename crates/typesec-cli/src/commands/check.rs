@@ -93,7 +93,7 @@ fn detect_format(explicit: &Option<String>, yaml: &str) -> Option<String> {
     if let Some(f) = explicit {
         return Some(f.clone());
     }
-    if yaml.contains("graph_policy:") {
+    if yaml.contains("graph_policy:") || yaml.contains("\"graph_policy\"") {
         Some("graph".into())
     } else if yaml.contains("roles:") {
         Some("rbac".into())

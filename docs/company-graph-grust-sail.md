@@ -4,6 +4,7 @@ This example models agents writing a company hierarchy graph while Typesec gates
 which nodes and relationships each agent may touch.
 
 - Rust + Grust + Sail: `cargo run -p typesec-cli --example company_graph_grust_sail`
+- Typed graph policy schema: `cargo run -p typesec-cli --example graph_policy_schema`
 - Python LangChain-style wrapper: `uv run python examples/company_graph/langchain_company_graph.py`
 - Python Pydantic AI wrapper: `uv run python examples/company_graph/pydantic_company_graph.py`
 - Graph policy: `policies/graph-corporate-example.yaml`
@@ -36,6 +37,17 @@ same graph. Rules can then test graph predicates such as:
 - target employee level is not `Executive`.
 - a proposed `REPORTS_TO` edge would not create a cycle.
 
+The loader now routes YAML and JSON graph policies through Grust 0.3 typed graph
+support and Zod schemas before the authorization engine sees a `Graph`. The
+schema example shows the important boundary checks:
+
+- `Agent`, `Role`, and `Employee` are the accepted node labels.
+- `Employee` nodes must carry the required company fields and reject extra
+  fields.
+- `HAS_ROLE` edges must connect `Agent -> Role`.
+- `REPORTS_TO` edges must connect `Employee -> Employee`.
+- YAML and JSON policies use the same typed loader.
+
 You can check the graph policy directly:
 
 ```sh
@@ -44,6 +56,7 @@ cargo run -p typesec-cli -- check --policy policies/graph-corporate-example.yaml
   --subject agent:hr-onboarding \
   --action write \
   --resource employee/private/employee:nia
+cargo run -p typesec-cli --example graph_policy_schema
 ```
 
 The Rust example uses Grust to construct a backend-neutral property graph. When

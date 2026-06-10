@@ -222,6 +222,42 @@ cargo run -p typesec-cli -- check --policy policies/graph-corporate-example.yaml
   --resource employee/private/employee:nia
 ```
 
+The graph policy loader now uses Grust 0.3 typed graph support with Zod schemas
+at the YAML/JSON boundary. That means the example policy is not just parsed as a
+loose property graph: `Agent`, `Role`, and `Employee` nodes are typed, `HAS_ROLE`
+must connect an `Agent` to a `Role`, `REPORTS_TO` must connect `Employee` nodes,
+and strict employee schemas reject unexpected properties.
+
+### Typed Graph Policy Schema
+
+Path:
+
+```text
+examples/company_graph/graph_policy_schema.rs
+```
+
+This example focuses on the policy loader itself. It demonstrates:
+
+1. YAML graph policy loading through the typed Grust/Zod path.
+2. JSON graph policy loading through the same schema boundary.
+3. A successful authorization decision from the typed JSON policy.
+4. Rejection of an unknown graph node label.
+5. Rejection of an extra employee property by a strict Zod schema.
+6. Rejection of a `HAS_ROLE` edge whose endpoints do not match the typed graph
+   model.
+
+Run it:
+
+```sh
+cargo run -p typesec-cli --example graph_policy_schema
+```
+
+Check that it still compiles:
+
+```sh
+cargo check -p typesec-cli --example graph_policy_schema
+```
+
 ### Rust + Grust + Sail
 
 Path:
@@ -233,7 +269,7 @@ examples/company_graph/company_graph_grust_sail.rs
 This example uses published Grust crates:
 
 ```toml
-grust-graph = { version = "0.2.0", features = ["sail"] }
+grust-graph = { version = "0.3.0", features = ["typed-zod-rs", "sail"] }
 ```
 
 It builds a backend-neutral property graph through the `grust` facade. If a Sail
@@ -361,6 +397,7 @@ cargo check --workspace
 cargo test --workspace
 cargo check -p typesec-cli --example rbac_agent
 cargo check -p typesec-cli --example odrl_agent
+cargo check -p typesec-cli --example graph_policy_schema
 cargo check -p typesec-cli --example company_graph_grust_sail
 uv run python examples/company_graph/langchain_company_graph.py
 uv run python examples/company_graph/pydantic_company_graph.py

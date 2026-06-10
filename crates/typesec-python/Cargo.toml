@@ -15,7 +15,7 @@ crate-type = ["cdylib"]
 extension-module = ["pyo3/extension-module"]
 
 [dependencies]
-typesec-core = { version = "0.3.0", path = "../typesec-core" }
-typesec-rbac = { version = "0.3.0", path = "../typesec-rbac" }
-typesec-odrl = { version = "0.3.0", path = "../typesec-odrl" }
+typesec-core = { version = "0.4.0", path = "../typesec-core" }
+typesec-rbac = { version = "0.4.0", path = "../typesec-rbac" }
+typesec-odrl = { version = "0.4.0", path = "../typesec-odrl" }
 pyo3 = { workspace = true }

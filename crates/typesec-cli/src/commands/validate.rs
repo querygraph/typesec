@@ -52,7 +52,8 @@ pub fn run(args: ValidateArgs) -> Result<()> {
             }
         }
         Some("graph") => {
-            let doc = typesec_rbac::graph_policy::GraphPolicyDocument::from_yaml(&yaml)?;
+            let doc = typesec_rbac::graph_policy::GraphPolicyDocument::from_yaml(&yaml)
+                .map_err(|e| anyhow::anyhow!(e))?;
             doc.validate().map_err(|e| anyhow::anyhow!(e))?;
             let graph = &doc.graph_policy.graph;
             let rule_count = doc.graph_policy.rules.len();
@@ -75,7 +76,7 @@ fn detect_format(explicit: &Option<String>, yaml: &str) -> Option<String> {
     if let Some(f) = explicit {
         return Some(f.clone());
     }
-    if yaml.contains("graph_policy:") {
+    if yaml.contains("graph_policy:") || yaml.contains("\"graph_policy\"") {
         Some("graph".into())
     } else if yaml.contains("roles:") && yaml.contains("assignments:") {
         Some("rbac".into())

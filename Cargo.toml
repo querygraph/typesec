@@ -13,7 +13,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 authors = ["typesec contributors"]
 license = "MIT OR Apache-2.0"
@@ -28,6 +28,7 @@ futures = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 serde_json = "1"
+garde = { version = "0.23.0", features = ["derive"] }
 
 # CLI
 clap = { version = "4", features = ["derive"] }
@@ -53,7 +54,7 @@ proc-macro2 = "1"
 
 # Glob matching for resource patterns
 glob = "0.3"
-grust-graph = { version = "0.2.0", path = "../grust/crates/grust" }
+grust-graph = { version = "0.3.0", path = "../grust/crates/grust", features = ["typed-zod-rs"] }
 
 [profile.release]
 lto = true
