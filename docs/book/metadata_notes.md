@@ -154,15 +154,23 @@ metadata to the intended library card string:
 <meta refines="#epub-title-1" property="file-as">typesec (0.4.0)</meta>
 ```
 
-Then create a Send to Kindle upload copy with the same basename:
+Then create a Send to Kindle upload copy with the same basename, and write a
+small dist marker that records both the Kindle/catalog name and the date the
+dist files were built:
 
 ```sh
 cp dist/typesec.epub "dist/$kindle_name.epub"
-printf '%s\n' "$kindle_name" > dist/VERSION.md
+{
+  printf 'kindle_name: %s\n' "$kindle_name"
+  printf 'built_at: %s\n' "$pubdate"
+} > dist/VERSION.md
 ```
 
 The upload copy can be byte-identical to the canonical EPUB. Its purpose is to
 make a Kindle filename fallback match the intended metadata exactly.
+`VERSION.md` gives downstream archive or delivery scripts a cheap way to see
+which Kindle name and build date are inside the dist directory without opening
+the EPUB.
 
 ## Why `--epub-title-page=false` Matters
 
@@ -235,7 +243,8 @@ source Markdown. A good metadata gate should fail the build if:
 - the navigation document is not marked `linear="no"` after the cover
 - the Kindle-facing OPF title does not match the generated short title and version
 - the OPF title lacks a matching `file-as` refinement
-- `dist/VERSION.md` does not match the generated Kindle name
+- `dist/VERSION.md` does not include the generated Kindle name
+- `dist/VERSION.md` does not include the dist build date
 - `EPUB/toc.ncx` does not have the real book title
 - `EPUB/nav.xhtml` does not have the real book title
 - the Send to Kindle upload copy basename does not match the Kindle-facing OPF title
@@ -280,6 +289,13 @@ Check that the Kindle upload filename cannot fall back to a lowercase title:
 ls -lh "dist/typesec (0.4.0).epub"
 cmp -s dist/book.epub "dist/typesec (0.4.0).epub"
 cat dist/VERSION.md
+```
+
+For example, `dist/VERSION.md` should look like:
+
+```text
+kindle_name: typesec (0.4.0)
+built_at: 2026-06-10
 ```
 
 List generated files and look for unwanted title pages:
