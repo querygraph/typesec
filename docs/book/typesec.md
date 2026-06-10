@@ -4,8 +4,9 @@ lang: en-US
 
 # Preface
 
-This book describes the Typesec system we designed, implemented, validated,
-published, and packaged today. It is both a design record and a codebase guide.
+This book describes Typesec, a system for carrying authorization evidence in
+types while leaving policy decisions explicit at runtime. It is both a design
+record and a codebase guide.
 The intent is not just to say what the repository contains, but to explain why
 each piece exists, how the pieces fit together, and what security property the
 system is trying to make harder to accidentally lose.
