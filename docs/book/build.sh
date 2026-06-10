@@ -46,11 +46,14 @@ if [[ -z "$kindle_short_title" ]]; then
 fi
 
 kindle_name="$kindle_short_title ($version)"
+stable_epub="docs/book/dist/$kindle_short_title.epub"
 kindle_epub="docs/book/dist/$kindle_name.epub"
 
 {
   printf 'kindle_name: %s\n' "$kindle_name"
   printf 'built_at: %s\n' "$pubdate"
+  printf 'epub_file: %s.epub\n' "$kindle_short_title"
+  printf 'kindle_link: %s.epub\n' "$kindle_name"
 } > docs/book/dist/VERSION.md
 
 sed "s/{{KINDLE_NAME}}/$kindle_name/g" docs/book/cover.md > "$tmpdir/cover.md"
@@ -76,8 +79,9 @@ pandoc "$tmpdir/cover.md" docs/book/typesec.md \
   --epub-title-page=false
 
 docs/book/fix_epub_layout.sh docs/book/dist/typesec.epub "$kindle_name"
+find docs/book/dist -maxdepth 1 -name "$kindle_short_title (*).epub" -exec rm -f {} +
+ln -s "$(basename "$stable_epub")" "$kindle_epub"
 docs/book/check_epub_metadata.sh docs/book/dist/typesec.epub "$kindle_name"
-cp docs/book/dist/typesec.epub "$kindle_epub"
 
 /Applications/calibre.app/Contents/MacOS/ebook-convert \
   docs/book/dist/typesec.epub \

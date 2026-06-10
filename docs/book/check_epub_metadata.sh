@@ -8,6 +8,8 @@ fi
 
 epub="$1"
 expected_title="${2:-Typesec}"
+epub_path="$(cd "$(dirname "$epub")" && pwd)/$(basename "$epub")"
+dist_dir="$(dirname "$epub_path")"
 
 if [[ ! -f "$epub" ]]; then
   echo "EPUB not found: $epub" >&2
@@ -58,8 +60,13 @@ regex_escape() {
 }
 
 expected_title_pattern="$(regex_escape "$expected_title")"
+expected_stem="${expected_title% (*}"
+stable_epub="$dist_dir/$expected_stem.epub"
+kindle_epub="$dist_dir/$expected_title.epub"
+version_marker="$dist_dir/VERSION.md"
 
 require_pattern "<dc:title[^>]*>$expected_title_pattern</dc:title>" "$opf" "missing dc:title"
+require_pattern "<meta[^>]*refines=\"#epub-title-1\"[^>]*property=\"file-as\"[^>]*>$expected_title_pattern</meta>" "$opf" "missing title sort metadata"
 require_pattern '<dc:creator[^>]*>Alexy Khrabrov</dc:creator>' "$opf" "missing dc:creator"
 require_pattern '<dc:language>en-US</dc:language>' "$opf" "missing dc:language"
 require_pattern '<dc:date[^>]*>[0-9]{4}-[0-9]{2}-[0-9]{2}</dc:date>' "$opf" "missing dc:date"
@@ -82,5 +89,35 @@ if unzip -l "$epub" | awk '{print $4}' | grep -qx 'EPUB/text/title_page.xhtml'; 
   echo "EPUB metadata check failed: generated empty title_page.xhtml is present" >&2
   exit 1
 fi
+
+if [[ ! -f "$stable_epub" ]]; then
+  echo "EPUB metadata check failed: stable title-stem EPUB is missing: $stable_epub" >&2
+  exit 1
+fi
+
+if ! cmp -s "$epub_path" "$stable_epub"; then
+  echo "EPUB metadata check failed: stable title-stem EPUB differs from canonical EPUB" >&2
+  exit 1
+fi
+
+if [[ ! -L "$kindle_epub" ]]; then
+  echo "EPUB metadata check failed: versioned Kindle EPUB is not a symlink: $kindle_epub" >&2
+  exit 1
+fi
+
+if [[ "$(readlink "$kindle_epub")" != "$(basename "$stable_epub")" ]]; then
+  echo "EPUB metadata check failed: versioned Kindle EPUB does not link to $(basename "$stable_epub")" >&2
+  exit 1
+fi
+
+if [[ ! -f "$version_marker" ]]; then
+  echo "EPUB metadata check failed: VERSION.md is missing" >&2
+  exit 1
+fi
+
+require_pattern "^kindle_name: $expected_title_pattern$" "$version_marker" "VERSION.md missing Kindle name"
+require_pattern '^built_at: [0-9]{4}-[0-9]{2}-[0-9]{2}$' "$version_marker" "VERSION.md missing build date"
+require_pattern "^epub_file: $(regex_escape "$(basename "$stable_epub")")$" "$version_marker" "VERSION.md missing stable EPUB filename"
+require_pattern "^kindle_link: $(regex_escape "$(basename "$kindle_epub")")$" "$version_marker" "VERSION.md missing versioned symlink filename"
 
 echo "EPUB metadata check passed: $epub"

@@ -7,3 +7,4 @@ src/policy_gen.rs
 __pycache__/
 *.py[cod]
 .venv/
+docs/book/dist/* (*).epub
