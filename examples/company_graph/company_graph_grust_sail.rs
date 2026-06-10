@@ -1,9 +1,10 @@
 //! Secure company graph writer using Typesec capabilities and Grust with Sail.
 //!
 //! If a Sail SparkConnect server is listening on `127.0.0.1:50051`, this example
-//! bootstraps the Grust Sail backend and writes the graph. If Sail is offline,
-//! it still demonstrates policy enforcement and prints the graph that would be
-//! persisted.
+//! bootstraps the Grust Sail backend, applies the company graph schema, and
+//! writes the graph through Grust's typed backend path. If Sail is offline, it
+//! still demonstrates policy enforcement and validates the graph against the
+//! schema that would be persisted.
 
 use std::{net::TcpStream, sync::Arc};
 
@@ -14,7 +15,7 @@ use typesec_core::{
     permissions::{CanReadSensitive, CanWrite},
     policy::CapabilityError,
 };
-use typesec_rbac::GraphPolicyEngine;
+use typesec_rbac::{GraphPolicyEngine, graph_policy::company_graph_schema};
 
 const POLICY: &str = include_str!("../../policies/graph-corporate-example.yaml");
 
@@ -173,17 +174,22 @@ async fn persist_graph_to_sail(
     _cap: &Capability<CanWrite, CompanyGraphResource>,
     graph: &Graph,
 ) -> grust::Result<()> {
+    let schema = company_graph_schema();
+    schema.validate_graph(graph)?;
+
     if TcpStream::connect("127.0.0.1:50051").is_err() {
-        println!("Sail is not listening on 127.0.0.1:50051; skipping backend write.");
+        println!(
+            "Sail is not listening on 127.0.0.1:50051; typed schema validation passed, skipping backend write."
+        );
         return Ok(());
     }
 
     let store = SailGraphStore::connect(SailConfig::default()).await?;
     store.bootstrap().await?;
     store.clear().await?;
-    let report = store.put_graph(graph).await?;
+    let report = store.put_typed_graph(&schema, graph).await?;
     println!(
-        "wrote graph to Sail via Grust: {} nodes, {} edges",
+        "wrote typed graph to Sail via Grust: {} nodes, {} edges",
         report.nodes, report.edges
     );
     Ok(())

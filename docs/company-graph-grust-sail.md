@@ -37,8 +37,9 @@ same graph. Rules can then test graph predicates such as:
 - target employee level is not `Executive`.
 - a proposed `REPORTS_TO` edge would not create a cycle.
 
-The loader now routes YAML and JSON graph policies through Grust 0.3 typed graph
-support and Zod schemas before the authorization engine sees a `Graph`. The
+The loader now routes YAML and JSON graph policies through Grust 0.4 typed graph
+support and Zod schemas before the authorization engine sees a `Graph`. The same
+company graph schema is used when examples write to Grust typed backends. The
 schema example shows the important boundary checks:
 
 - `Agent`, `Role`, and `Employee` are the accepted node labels.
@@ -47,6 +48,8 @@ schema example shows the important boundary checks:
 - `HAS_ROLE` edges must connect `Agent -> Role`.
 - `REPORTS_TO` edges must connect `Employee -> Employee`.
 - YAML and JSON policies use the same typed loader.
+- `MemoryGraphStore::put_typed_graph` accepts the valid policy graph and rejects
+  graphs that violate the typed backend schema.
 
 You can check the graph policy directly:
 
@@ -60,9 +63,10 @@ cargo run -p typesec-cli --example graph_policy_schema
 ```
 
 The Rust example uses Grust to construct a backend-neutral property graph. When
-Sail SparkConnect is listening on `127.0.0.1:50051`, it writes the graph through
-`SailGraphStore`; otherwise it skips the backend write and still demonstrates the
-security checks.
+Sail SparkConnect is listening on `127.0.0.1:50051`, it applies the shared
+company graph schema and writes the graph through
+`SailGraphStore::put_typed_graph`; otherwise it still validates the graph against
+that schema and demonstrates the security checks.
 
 The Python examples share `company_graph_core.py`, which owns the in-memory
 graph, employee fixture data, and `TypesecGate`. The gate tries the Rust-backed

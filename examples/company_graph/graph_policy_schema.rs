@@ -1,11 +1,13 @@
 //! Demonstrate the typed Grust + Zod policy boundary for graph policies.
 //!
-//! This example does not need a graph backend. It shows that Typesec accepts the
-//! author-friendly YAML policy, accepts the same shape as JSON, and rejects
-//! graph facts that do not match the typed policy model.
+//! This example does not need an external graph backend. It shows that Typesec
+//! accepts the author-friendly YAML policy, accepts the same shape as JSON,
+//! rejects graph facts that do not match the typed policy model, and can persist
+//! the validated graph through Grust's typed backend path.
 
+use grust::prelude::{GraphStore, MemoryGraphStore};
 use typesec_core::policy::{PolicyEngine, PolicyResult};
-use typesec_rbac::graph_policy::{GraphPolicyDocument, GraphPolicyEngine};
+use typesec_rbac::graph_policy::{GraphPolicyDocument, GraphPolicyEngine, company_graph_schema};
 
 const POLICY_YAML: &str = include_str!("../../policies/graph-corporate-example.yaml");
 
@@ -54,8 +56,10 @@ const POLICY_JSON: &str = r#"
 }
 "#;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let yaml_doc = GraphPolicyDocument::from_yaml(POLICY_YAML)?;
+    let schema = yaml_doc.graph_schema();
     println!(
         "YAML policy accepted: {} typed nodes, {} typed edges, {} rules",
         yaml_doc.graph_policy.graph.nodes.len(),
@@ -79,6 +83,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(decision, PolicyResult::Allow);
     println!("typed JSON policy grants HR write access to Nia's private employee node");
 
+    let store = MemoryGraphStore::new();
+    let report = store
+        .put_typed_graph(&schema, &yaml_doc.graph_policy.graph)
+        .await?;
+    println!(
+        "typed memory backend accepted the policy graph: {} nodes, {} edges",
+        report.nodes, report.edges
+    );
+
     expect_error(
         "unknown node label",
         &POLICY_YAML.replace("label: Role", "label: Group"),
@@ -100,6 +113,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ),
         "HAS_ROLE edge from node 'employee:nia' must have label 'Agent'",
     );
+
+    let mut invalid_graph = yaml_doc.graph_policy.graph.clone();
+    if let Some(edge) = invalid_graph
+        .edges
+        .iter_mut()
+        .find(|edge| edge.label.as_str() == "HAS_ROLE")
+    {
+        edge.from = "employee:nia".into();
+    }
+    let err = company_graph_schema()
+        .validate_graph(&invalid_graph)
+        .expect_err("typed backend schema should reject invalid edge endpoint");
+    assert!(
+        err.to_string()
+            .contains("edge 'HAS_ROLE' cannot start from node label 'Employee'"),
+        "unexpected schema error: {err}"
+    );
+    println!("typed backend schema rejected invalid graph: {err}");
 
     Ok(())
 }

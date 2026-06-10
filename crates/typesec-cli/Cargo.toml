@@ -47,5 +47,5 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
-grust-graph = { workspace = true, features = ["sail"] }
+grust-graph = { workspace = true, features = ["memory", "sail"] }
 typesec-integrations = { version = "0.4.0", path = "../typesec-integrations" }

@@ -210,16 +210,21 @@ grust = { path = "../../../grust/crates/grust", features = ["sail"] }
 ```
 
 After the Grust crates were published, the dependency was moved to the
-published facade crate:
+published facade crate. The current examples use Grust 0.4 typed graph and
+typed backend support:
 
 ```toml
 [dev-dependencies]
-grust-graph = { version = "0.2.0", features = ["sail"] }
+grust-graph = { version = "0.4.0", features = ["typed-zod-rs", "sail"] }
 ```
 
 The package is named `grust-graph`, while its library is imported as `grust`.
 The facade re-exports the core graph API and, with the `sail` feature enabled,
-the Sail adapter types.
+the Sail adapter types. The `typed-zod-rs` feature lets Typesec route policy
+YAML and JSON through Zod schemas before typed Rust structs lower into a Grust
+graph. The same graph schema is then passed to Grust backends with
+`put_typed_graph`, so persistence validates the graph shape instead of accepting
+a loose property graph.
 
 # `typesec-core`
 
@@ -1181,6 +1186,12 @@ easy to sandbox, inspect, and test.
 The published Grust integration also records a naming tradeoff. The package is
 published as `grust-graph`, but it exposes the facade library as `grust`, so
 examples can keep the natural `use grust::prelude::*` shape.
+
+The graph-policy example now uses two validation boundaries. Zod validates
+author-facing YAML and JSON before the policy graph is built. Grust's
+`GraphSchema` validates backend writes through `put_typed_graph`, so the same
+`Agent`, `Role`, `Employee`, `HAS_ROLE`, and `REPORTS_TO` model protects both
+policy loading and graph persistence.
 
 The OAuth provider integration records a different tradeoff. Typesec should not
 be a token vault, a hosted IdP, or a full MCP runtime. The integration crate

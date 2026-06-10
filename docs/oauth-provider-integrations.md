@@ -11,7 +11,7 @@ Provider integrations live in `typesec-integrations` and are re-exported by the
 facade crate behind the `integrations` feature:
 
 ```toml
-typesec = { version = "0.3.0", features = ["integrations"] }
+typesec = { version = "0.4.0", features = ["integrations"] }
 ```
 
 The integrations crate currently provides:

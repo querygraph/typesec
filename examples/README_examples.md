@@ -222,11 +222,12 @@ cargo run -p typesec-cli -- check --policy policies/graph-corporate-example.yaml
   --resource employee/private/employee:nia
 ```
 
-The graph policy loader now uses Grust 0.3 typed graph support with Zod schemas
-at the YAML/JSON boundary. That means the example policy is not just parsed as a
-loose property graph: `Agent`, `Role`, and `Employee` nodes are typed, `HAS_ROLE`
-must connect an `Agent` to a `Role`, `REPORTS_TO` must connect `Employee` nodes,
-and strict employee schemas reject unexpected properties.
+The graph policy loader now uses Grust 0.4 typed graph support with Zod schemas
+at the YAML/JSON boundary, and the examples write validated graphs through
+Grust's typed backend path. That means the example policy is not just parsed as
+a loose property graph: `Agent`, `Role`, and `Employee` nodes are typed,
+`HAS_ROLE` must connect an `Agent` to a `Role`, `REPORTS_TO` must connect
+`Employee` nodes, and strict employee schemas reject unexpected properties.
 
 ### Typed Graph Policy Schema
 
@@ -241,10 +242,12 @@ This example focuses on the policy loader itself. It demonstrates:
 1. YAML graph policy loading through the typed Grust/Zod path.
 2. JSON graph policy loading through the same schema boundary.
 3. A successful authorization decision from the typed JSON policy.
-4. Rejection of an unknown graph node label.
-5. Rejection of an extra employee property by a strict Zod schema.
-6. Rejection of a `HAS_ROLE` edge whose endpoints do not match the typed graph
+4. Persistence of the typed policy graph through `MemoryGraphStore::put_typed_graph`.
+5. Rejection of an unknown graph node label.
+6. Rejection of an extra employee property by a strict Zod schema.
+7. Rejection of a `HAS_ROLE` edge whose endpoints do not match the typed graph
    model.
+8. Rejection of the same endpoint mismatch by the backend `GraphSchema`.
 
 Run it:
 
@@ -269,13 +272,14 @@ examples/company_graph/company_graph_grust_sail.rs
 This example uses published Grust crates:
 
 ```toml
-grust-graph = { version = "0.3.0", features = ["typed-zod-rs", "sail"] }
+grust-graph = { version = "0.4.0", features = ["typed-zod-rs", "sail"] }
 ```
 
 It builds a backend-neutral property graph through the `grust` facade. If a Sail
-SparkConnect server is listening on `127.0.0.1:50051`, it writes the graph
-through the facade's Sail adapter exports; otherwise it skips the backend write
-and still exercises the Typesec policy checks.
+SparkConnect server is listening on `127.0.0.1:50051`, it applies the shared
+company graph schema and writes the graph with `put_typed_graph`; otherwise it
+still validates the graph against that schema and exercises the Typesec policy
+checks.
 
 Run it:
 

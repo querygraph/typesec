@@ -2,7 +2,7 @@
 
 ## Separate Cover Page
 
-Use `book/cover.md` as a standalone cover source and keep it separate from the
+Use `docs/book/cover.md` as a standalone cover source and keep it separate from the
 main manuscript. The file contains two raw blocks:
 
 - A Typst block for the PDF cover.
@@ -15,7 +15,7 @@ Keep the visible text synchronized between both blocks.
 Render the cover by itself:
 
 ```sh
-pandoc book/cover.md \
+pandoc docs/book/cover.md \
   -o "$tmpdir/cover.pdf" \
   --pdf-engine=typst
 ```
@@ -23,7 +23,7 @@ pandoc book/cover.md \
 Render the book body separately, with the table of contents:
 
 ```sh
-pandoc book/typesec.md \
+pandoc docs/book/typesec.md \
   -o "$tmpdir/body.pdf" \
   --pdf-engine=typst \
   --toc \
@@ -33,7 +33,7 @@ pandoc book/typesec.md \
 Merge the cover before the body:
 
 ```sh
-pdfunite "$tmpdir/cover.pdf" "$tmpdir/body.pdf" book/dist/typesec.pdf
+pdfunite "$tmpdir/cover.pdf" "$tmpdir/body.pdf" docs/book/dist/typesec.pdf
 ```
 
 This ensures the PDF starts with a full cover page, followed by the table of
@@ -44,8 +44,8 @@ contents and the numbered body.
 Pass the cover file before the manuscript:
 
 ```sh
-pandoc book/cover.md book/typesec.md \
-  -o book/dist/typesec.epub \
+pandoc docs/book/cover.md docs/book/typesec.md \
+  -o docs/book/dist/typesec.epub \
   --toc \
   --number-sections
 ```
@@ -53,7 +53,7 @@ pandoc book/cover.md book/typesec.md \
 Convert the EPUB to MOBI:
 
 ```sh
-ebook-convert book/dist/typesec.epub book/dist/typesec.mobi
+ebook-convert docs/book/dist/typesec.epub docs/book/dist/typesec.mobi
 ```
 
 On this machine, Calibre's converter is available at:

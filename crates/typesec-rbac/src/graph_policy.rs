@@ -6,7 +6,8 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use glob::Pattern;
 use grust::prelude::{
-    Direction, Graph, Label, Node, NodeId, TypedEdge, TypedGraphBuilder, TypedNode, Value, garde,
+    Direction, Field, FieldType, Graph, GraphSchema, Label, Node, NodeId, TypedEdge,
+    TypedGraphBuilder, TypedNode, Value, garde,
     zod_rs::prelude::{object, string},
 };
 use serde::{Deserialize, Deserializer, Serialize};
@@ -56,6 +57,43 @@ impl GraphPolicyDocument {
         }
         Ok(())
     }
+
+    pub fn graph_schema(&self) -> GraphSchema {
+        company_graph_schema()
+    }
+}
+
+pub fn company_graph_schema() -> GraphSchema {
+    GraphSchema::builder()
+        .node("Agent", vec![Field::required("id", FieldType::String)])
+        .node("Role", vec![Field::required("id", FieldType::String)])
+        .node(
+            "Employee",
+            vec![
+                Field::required("id", FieldType::String),
+                Field::required("name", FieldType::String),
+                Field::required("title", FieldType::String),
+                Field::required("department", FieldType::String),
+                Field::required("level", FieldType::String),
+                Field::required("compensation_band", FieldType::String),
+            ],
+        )
+        .edge(
+            "HAS_ROLE",
+            vec![Label::from("Agent")],
+            vec![Label::from("Role")],
+            Vec::<Field>::new(),
+        )
+        .edge(
+            "REPORTS_TO",
+            vec![Label::from("Employee")],
+            vec![Label::from("Employee")],
+            vec![
+                Field::optional("visibility", FieldType::String),
+                Field::optional("source", FieldType::String),
+            ],
+        )
+        .build()
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -920,6 +958,15 @@ graph_policy:
         let doc = GraphPolicyDocument::from_json(json).expect("JSON graph policy should load");
         assert_eq!(doc.graph_policy.graph.nodes.len(), 3);
         assert_eq!(doc.graph_policy.graph.edges.len(), 1);
+    }
+
+    #[test]
+    fn exported_company_graph_schema_validates_policy_graph() {
+        let doc = GraphPolicyDocument::from_yaml(YAML).expect("graph policy should load");
+        let schema = doc.graph_schema();
+        schema
+            .validate_graph(&doc.graph_policy.graph)
+            .expect("schema should validate graph policy graph");
     }
 
     #[test]
