@@ -48,7 +48,10 @@ fi
 kindle_name="$kindle_short_title ($version)"
 kindle_epub="docs/book/dist/$kindle_name.epub"
 
-printf '%s\n' "$kindle_name" > docs/book/dist/VERSION.md
+{
+  printf 'kindle_name: %s\n' "$kindle_name"
+  printf 'built_at: %s\n' "$pubdate"
+} > docs/book/dist/VERSION.md
 
 sed "s/{{KINDLE_NAME}}/$kindle_name/g" docs/book/cover.md > "$tmpdir/cover.md"
 
