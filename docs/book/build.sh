@@ -76,6 +76,7 @@ pandoc "$tmpdir/cover.md" docs/book/typesec.md \
   --number-sections \
   --metadata-file docs/book/metadata.yaml \
   --metadata date="$pubdate" \
+  --css docs/book/epub.css \
   --epub-title-page=false
 
 docs/book/fix_epub_layout.sh docs/book/dist/typesec.epub "$kindle_name"

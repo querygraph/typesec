@@ -98,6 +98,14 @@ PDF should have:
 For the EPUB cover, keep the HTML simple. Do not use flexbox. Kindle renderers
 are more reliable with centered text and margins.
 
+Keep code blocks compact in EPUB and MOBI through `docs/book/epub.css`. Pandoc's
+syntax highlighting emits one `<span>` per source line and represents
+intentional blank source lines as empty spans; reader defaults can turn those
+empty spans into large gaps. The stylesheet overrides `div.sourceCode`, `pre`,
+`pre code`, `pre > code.sourceCode > span`, and
+`pre > code.sourceCode > span:empty` so code uses tight line-height and empty
+source-line spans do not render as extra vertical whitespace.
+
 ## Build
 
 From the repository root:
@@ -116,7 +124,8 @@ The build script:
 6. Builds a standalone cover PDF.
 7. Builds the body PDF with table of contents and numbered sections.
 8. Merges cover PDF before body PDF into `docs/book/dist/typesec.pdf`.
-9. Builds `docs/book/dist/typesec.epub` with `--epub-title-page=false`.
+9. Builds `docs/book/dist/typesec.epub` with `--css docs/book/epub.css` and
+   `--epub-title-page=false`.
 10. Runs `fix_epub_layout.sh` to repair Pandoc EPUB defaults.
 11. Creates the versioned EPUB symlink.
 12. Runs `check_epub_metadata.sh`.
@@ -161,6 +170,7 @@ The validator rejects:
 - A generated empty `title_page.xhtml`.
 - A generated wrapper heading before the cover.
 - Flexbox in the EPUB cover.
+- Missing compact code-block rules in the EPUB stylesheet.
 - Missing stable EPUB.
 - A stable EPUB that differs from the canonical EPUB.
 - A missing or non-symlink versioned Kindle EPUB.
