@@ -1,4 +1,5 @@
 ```{=typst}
+#set page(margin: 1in, numbering: none)
 #align(center)[
   #v(28%)
   #text(size: 46pt, weight: "bold", bottom-edge: "bounds")[Typesec]

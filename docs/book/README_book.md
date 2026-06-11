@@ -10,7 +10,8 @@ main manuscript. The file contains two raw blocks:
 
 Keep the visible text synchronized between both blocks. The visible cover stays
 stable and does not include the package version; versioning is reserved for
-Kindle-facing EPUB metadata.
+Kindle-facing EPUB metadata. The Typst cover block disables page numbering so
+the standalone cover page has no printed page number.
 
 ## Metadata
 
@@ -55,8 +56,9 @@ Merge the cover before the body:
 pdfunite "$tmpdir/cover.pdf" "$tmpdir/body.pdf" docs/book/dist/typesec.pdf
 ```
 
-This ensures the PDF starts with a full cover page, followed by the table of
-contents and the numbered body.
+This ensures the PDF starts with a full unnumbered cover page, followed by the
+table of contents and the numbered body. Printed page numbers start after the
+cover.
 
 ## EPUB and MOBI Build
 
