@@ -24,7 +24,7 @@ Then have the build script read the short title stem and version from project
 metadata and render a temporary cover before calling Pandoc. For the Typesec
 book, `docs/book/metadata.yaml` contains `title_stem: typesec`, and the Rust
 workspace version comes from `[workspace.package].version` in `Cargo.toml`.
-Together they generate `kindle_name`, for example `typesec (0.4.0)`, which is
+Together they generate `kindle_name`, for example `typesec (0.5.0)`, which is
 also used for Kindle-facing EPUB metadata and `dist/VERSION.md`.
 
 ## Typst Cover Spacing

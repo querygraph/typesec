@@ -12,6 +12,7 @@ Python-side action on the CLI result.
 
 from __future__ import annotations
 
+import json
 import subprocess
 import tempfile
 import textwrap
@@ -31,6 +32,7 @@ class TypesecCliPolicyTests(unittest.TestCase):
         action: str,
         resource: str,
         purpose: str | None = None,
+        json_output: bool = False,
     ) -> subprocess.CompletedProcess[str]:
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as handle:
             handle.write(textwrap.dedent(policy))
@@ -56,6 +58,8 @@ class TypesecCliPolicyTests(unittest.TestCase):
             ]
             if purpose is not None:
                 command.extend(["--purpose", purpose])
+            if json_output:
+                command.append("--json")
 
             return subprocess.run(
                 command,
@@ -130,6 +134,48 @@ class TypesecCliPolicyTests(unittest.TestCase):
             purpose="billing",
         )
         self.assertNotEqual(blocked.returncode, 0, blocked.stdout + blocked.stderr)
+
+    def test_python_can_parse_json_check_output(self) -> None:
+        policy = """
+        roles:
+          - name: analyst
+            permissions: [read]
+            resources: ["reports/*"]
+        assignments:
+          - subject: "agent:analyst"
+            roles: [analyst]
+        """
+
+        allow = self.run_typesec_check(
+            policy=policy,
+            subject="agent:analyst",
+            action="read",
+            resource="reports/q1",
+            json_output=True,
+        )
+        self.assertEqual(allow.returncode, 0, allow.stdout + allow.stderr)
+
+        decision = json.loads(allow.stdout)
+        self.assertEqual(decision["decision"], "allow")
+        self.assertTrue(decision["allowed"])
+        self.assertEqual(decision["format"], "rbac")
+        self.assertEqual(decision["subject"], "agent:analyst")
+        self.assertEqual(decision["action"], "read")
+        self.assertEqual(decision["resource"], "reports/q1")
+
+        deny = self.run_typesec_check(
+            policy=policy,
+            subject="agent:analyst",
+            action="write",
+            resource="reports/q1",
+            json_output=True,
+        )
+        self.assertEqual(deny.returncode, 1, deny.stdout + deny.stderr)
+
+        denied_decision = json.loads(deny.stdout)
+        self.assertEqual(denied_decision["decision"], "deny")
+        self.assertFalse(denied_decision["allowed"])
+        self.assertIn("reason", denied_decision)
 
 
 if __name__ == "__main__":

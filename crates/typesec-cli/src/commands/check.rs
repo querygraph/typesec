@@ -2,6 +2,7 @@
 
 use anyhow::Result;
 use clap::Args;
+use serde::Serialize;
 use std::path::PathBuf;
 use typesec_core::policy::{PolicyEngine, PolicyResult};
 
@@ -30,6 +31,10 @@ pub struct CheckArgs {
     /// Purpose context for ODRL constraint evaluation.
     #[arg(long)]
     pub purpose: Option<String>,
+
+    /// Print a machine-readable JSON decision.
+    #[arg(long)]
+    pub json: bool,
 }
 
 pub fn run(args: CheckArgs) -> Result<()> {
@@ -64,6 +69,16 @@ pub fn run(args: CheckArgs) -> Result<()> {
         ),
     };
 
+    if args.json {
+        print_json_result(&args, format.as_deref(), &result)?;
+    } else {
+        print_human_result(&args, &result);
+    }
+
+    exit_for_result(&result);
+}
+
+fn print_human_result(args: &CheckArgs, result: &PolicyResult) {
     match &result {
         PolicyResult::Allow => {
             println!("✓ ALLOW");
@@ -77,16 +92,65 @@ pub fn run(args: CheckArgs) -> Result<()> {
             println!("  Action:   {}", args.action);
             println!("  Resource: {}", args.resource);
             println!("  Reason:   {reason}");
-            std::process::exit(1);
         }
         PolicyResult::Delegate(to) => {
             println!("→ DELEGATE to: {to}");
             println!("  (no definitive answer from this engine)");
-            std::process::exit(2);
         }
     }
+}
 
+fn print_json_result(args: &CheckArgs, format: Option<&str>, result: &PolicyResult) -> Result<()> {
+    let response = CheckJsonResponse::new(args, format, result);
+    println!("{}", serde_json::to_string_pretty(&response)?);
     Ok(())
+}
+
+fn exit_for_result(result: &PolicyResult) -> ! {
+    match result {
+        PolicyResult::Allow => std::process::exit(0),
+        PolicyResult::Deny(_) => std::process::exit(1),
+        PolicyResult::Delegate(_) => std::process::exit(2),
+    }
+}
+
+#[derive(Serialize)]
+struct CheckJsonResponse<'a> {
+    decision: &'static str,
+    allowed: bool,
+    subject: &'a str,
+    action: &'a str,
+    resource: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    format: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    purpose: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    delegate_to: Option<&'a str>,
+}
+
+impl<'a> CheckJsonResponse<'a> {
+    fn new(args: &'a CheckArgs, format: Option<&'a str>, result: &'a PolicyResult) -> Self {
+        let (decision, allowed, reason, delegate_to) = match result {
+            PolicyResult::Allow => ("allow", true, None, None),
+            PolicyResult::Deny(reason) => ("deny", false, Some(reason.as_str()), None),
+            PolicyResult::Delegate(to) => ("delegate", false, None, Some(to.as_str())),
+        };
+
+        Self {
+            decision,
+            allowed,
+            subject: &args.subject,
+            action: &args.action,
+            resource: &args.resource,
+            format,
+            purpose: args.purpose.as_deref(),
+            reason,
+            delegate_to,
+        }
+    }
 }
 
 fn detect_format(explicit: &Option<String>, yaml: &str) -> Option<String> {

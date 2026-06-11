@@ -52,7 +52,7 @@ typesec-core      ← traits, phantom types, Capability, PolicyEngine, typestate
 typesec-rbac      ← YAML RBAC → runtime engine + codegen
 typesec-odrl      ← YAML ODRL → constraint evaluation + audit log
 typesec-agent     ← SecureAgent: authenticate + request_capability + execute
-typesec-integrations ← JWT/OIDC, WorkOS FGA, Arcade-style tool auth engines
+typesec-integrations ← JWT/OIDC, WorkOS FGA, Arcade-style tool auth, DID messaging
 typesec-macro     ← #[derive(TypesecRole)], policy! macro
 typesec-cli       ← validate / check / generate / run commands
 typesec-python    ← PyO3 bindings for Rust-backed Python policy gates
@@ -164,6 +164,9 @@ The optional `integrations` feature adds provider-facing adapters:
   resources such as `project/proj_123`.
 - **`ArcadeToolAuthEngine`** checks whether a user has authorized an external
   tool such as `Gmail.ListEmails`.
+- **DID messaging** verifies DID-wrapped encrypted prompts, converts plaintext
+  into `SecureValue<Secret, _, _>`, and sends prompts to Ollama only after
+  typed inference and sensitive-read capabilities exist.
 - **`ProtectedTool`** wraps local tool handlers so invocation requires a
   matching `Capability<P, R>`.
 
@@ -196,8 +199,26 @@ let engine = PolicyEngineBuilder::new()
     .build();
 ```
 
+For decentralized-identity messaging, the shape is similar but identity and
+payload protection come from a DID envelope:
+
+```text
+DID envelope
+  -> DidResolver resolves sender and recipient DID documents
+  -> DidKeyStore verifies the sender and decrypts for the local recipient
+  -> DidMessageGateway protects plaintext as SecureValue<Secret, _, _>
+  -> PolicyEngine mints AiCanInfer and CanReadSensitive capabilities
+  -> DidOllamaClient can call Ollama or forward the wrapped envelope
+```
+
+The repository ships `StaticDidResolver` and `DemoDidKeyStore` for deterministic
+local tests. Production deployments should replace those with DIDComm/JWE,
+HPKE, an HSM/KMS-backed key store, Hyperledger Indy VDR, or a Universal
+Resolver client behind the same traits.
+
 See [`docs/typesec-and-auth-frameworks.md`](docs/typesec-and-auth-frameworks.md),
-[`docs/oauth-provider-integrations.md`](docs/oauth-provider-integrations.md), and
+[`docs/oauth-provider-integrations.md`](docs/oauth-provider-integrations.md),
+[`docs/did-messaging.md`](docs/did-messaging.md), and
 [`examples/provider_integrations.rs`](examples/provider_integrations.rs).
 
 ### typesec-macro

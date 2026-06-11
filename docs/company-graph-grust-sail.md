@@ -37,7 +37,7 @@ same graph. Rules can then test graph predicates such as:
 - target employee level is not `Executive`.
 - a proposed `REPORTS_TO` edge would not create a cycle.
 
-The loader now routes YAML and JSON graph policies through Grust 0.4 typed graph
+The loader now routes YAML and JSON graph policies through Grust 0.5 typed graph
 support and Zod schemas before the authorization engine sees a `Graph`. The same
 company graph schema is used when examples write to Grust typed backends. The
 schema example shows the important boundary checks:

@@ -9,6 +9,7 @@ This note reviews the first Claude draft and records the next useful upgrades.
 - Made `cargo clippy --all-targets -- -D warnings` pass by tightening the combinator API, deriving defaults, documenting public ODRL fields, and applying current Clippy simplifications.
 - Stabilized the audit integration test by using a global capture subscriber for the test binary instead of a racy thread-local subscriber.
 - Added Python smoke tests around `typesec check` so Python agents can exercise policy decisions without a native binding.
+- Added `typesec check --json` so Python and shell agents can consume a stable machine-readable decision without parsing human output.
 
 ## Design Gaps To Close Next
 
@@ -16,7 +17,6 @@ This note reviews the first Claude draft and records the next useful upgrades.
 - Generate typed permission/resource modules from policy files, then compile downstream examples against generated code so policy renames break at compile time.
 - Split policy `Deny`, `Delegate`, and constraint failure semantics more explicitly. Today `mint_capability` treats delegation as an error; composed deployments should make that fallback path first-class.
 - Consider a revocation/expiry story for capabilities. The current token proves a decision at mint time, but long-running agents may need epoch-bound or lease-bound capabilities.
-- Give Python a stable machine-readable CLI mode, for example `typesec check --json`, so agent wrappers do not need to parse human output.
 - Add an optional PyO3 crate later if Python integrations need in-process checks, but keep the CLI boundary first because it is easy to sandbox and test.
 
 ## Python And LangChain Testing

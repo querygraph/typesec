@@ -179,6 +179,15 @@ typesec-cli       validate, check, generate, and run commands
 typesec-python    PyO3 bindings for Rust-backed Python policy gates
 ```
 
+The integration layer also includes an initial DID messaging boundary. DIDs are
+used as verifiable subjects and key-discovery handles, while policy still flows
+through `PolicyEngine`. A DID-wrapped prompt can be verified, decrypted into a
+`SecureValue<Secret, String, GenericResource>`, and sent to Ollama only after
+Typesec mints both the sensitive-read and AI-inference capabilities. The local
+implementation uses a deterministic demo key store for tests; production
+backends should plug in DIDComm/JWE, Hyperledger Indy VDR, or a Universal
+Resolver adapter behind the same resolver trait.
+
 The repository also includes:
 
 ```text
@@ -187,6 +196,7 @@ examples/odrl_agent.rs
 examples/provider_integrations.rs
 examples/company_graph/company_graph_grust_sail.rs
 examples/company_graph/langchain_company_graph.py
+docs/did-messaging.md
 policies/rbac-example.yaml
 policies/odrl-example.yaml
 docs/company-graph-grust-sail.md
@@ -211,12 +221,12 @@ grust = { path = "../../../grust/crates/grust", features = ["sail"] }
 ```
 
 After the Grust crates were published, the dependency was moved to the
-published facade crate. The current examples use Grust 0.4 typed graph and
+published facade crate. The current examples use Grust 0.5 typed graph and
 typed backend support:
 
 ```toml
 [dev-dependencies]
-grust-graph = { version = "0.4.0", features = ["typed-zod-rs", "sail"] }
+grust-graph = { version = "0.5.0", features = ["typed-zod-rs", "sail"] }
 ```
 
 The package is named `grust-graph`, while its library is imported as `grust`.
@@ -510,6 +520,186 @@ important, but ordinary application code can still ignore them unless every
 call site is disciplined. Typesec adds the local last mile: the handler is
 written to require a typed capability, so the call cannot be made by accident.
 
+## Where DIDs Fit
+
+DIDs add another edge identity and messaging pattern. They are useful when an
+agent, user, service, model gateway, or organization needs a portable
+cryptographic identifier that can be resolved without depending on one OAuth
+provider. A DID document can advertise verification methods and service
+endpoints. A message can be signed by the sender DID and encrypted for the
+recipient DID.
+
+That does not replace Typesec policy. DID verification answers:
+
+```text
+Did the sender control did:key:z... when it signed this envelope?
+Was the ciphertext encrypted for this local recipient DID?
+Which keys and endpoints are advertised by the DID document?
+```
+
+Typesec answers a different question:
+
+```text
+May did:key:z... run ai:infer on prompt/session/123?
+May this code reveal a Secret prompt?
+May the result be sent outside the current trust boundary?
+```
+
+The DID support therefore belongs in `typesec-integrations`, not
+`typesec-core`. The integration crate verifies and decrypts the message at the
+edge, then hands the result to the same `PolicyEngine` and `SecureValue`
+machinery as every other integration.
+
+The current implementation is deliberately modest:
+
+```text
+Did                 parsed decentralized identifier string
+DidDocument         verification methods, key agreement, service endpoints
+DidResolver         trait for resolving a DID to a DID document
+DidKeyStore         trait for signing, verifying, encrypting, and decrypting
+DidEnvelope         encrypted DID-wrapped prompt envelope
+DidMessageGateway  verifier/decrypter that returns a protected prompt
+DidOllamaClient    Ollama bridge for verified or still-wrapped prompts
+```
+
+`StaticDidResolver` and `DemoDidKeyStore` make tests deterministic. They are
+not production DID infrastructure. Production deployments should implement the
+same traits with DIDComm/JWE, HPKE, HSM/KMS-backed keys, Hyperledger Indy VDR,
+`did:web`, `did:key`, or a Universal Resolver client.
+
+## DID-Wrapped Prompts and Ollama
+
+The first concrete DID use case is an encrypted prompt for a local or modified
+Ollama server. The conservative path keeps Typesec in charge of reveal:
+
+```text
+DID envelope arrives
+  -> DidResolver resolves sender and recipient DID documents
+  -> DidKeyStore verifies the sender signature
+  -> DidKeyStore decrypts for the local recipient DID
+  -> DidMessageGateway returns VerifiedDidPrompt
+  -> prompt is SecureValue<Secret, String, GenericResource>
+  -> PolicyEngine mints AiCanInfer and CanReadSensitive capabilities
+  -> DidOllamaClient sends plaintext to Ollama
+```
+
+The important detail is the `SecureValue` boundary. The decrypted prompt is not
+returned as an ordinary string. It becomes:
+
+```rust
+SecureValue<Secret, String, GenericResource>
+```
+
+That means the client must hold a sensitive-read capability to reveal it:
+
+```rust
+let verified = gateway.open_prompt(&envelope)?;
+
+let infer: Capability<AiCanInfer, _> =
+    mint_capability(engine, verified.subject.as_str(), &verified.resource)?;
+let read: Capability<CanReadSensitive, _> =
+    mint_capability(engine, verified.subject.as_str(), &verified.resource)?;
+
+let ollama = DidOllamaClient::new("http://localhost:11434", "llama3.2");
+let response = ollama.chat_verified_prompt(verified, &infer, &read)?;
+```
+
+There is also a compatibility path for a DID-aware Ollama fork:
+
+```rust
+let response = ollama.chat_wrapped_prompt(&envelope)?;
+```
+
+That sends the whole envelope under a `did_envelope` JSON field. This is useful
+when the model gateway expects the DID-wrapped prompt directly. The stricter
+local path should remain the default for Typesec-controlled applications
+because the plaintext reveal is guarded by typed capabilities.
+
+## DID Examples
+
+The repository includes a runnable DID example:
+
+```sh
+cargo run -p typesec-cli --example did_messaging
+```
+
+It creates two local `did:key` identifiers:
+
+```rust
+let alice = Did::key(b"alice");
+let gateway_did = Did::key(b"typesec-ollama-gateway");
+```
+
+Then it registers DID documents in a `StaticDidResolver`, creates a
+`DidEnvelope`, verifies and decrypts that envelope through `DidMessageGateway`,
+and sends the prompt through `DidOllamaClient` only after policy mints
+`Capability<AiCanInfer, _>` and `Capability<CanReadSensitive, _>`.
+
+That example is intentionally offline. It uses `DemoDidKeyStore` and
+`RecordingHttpClient`, so it exercises the Typesec boundary without requiring a
+live Ollama server, a public DID registry, or a Hyperledger ledger.
+
+The same trait shape supports more realistic DID methods:
+
+```text
+did:key       derive the document from key material; best for local tests
+did:web       fetch a DID document from an HTTPS domain
+did:indy      read DID state from Hyperledger Indy through Indy VDR
+public DID    call a Universal Resolver and translate the DID document
+```
+
+For Hyperledger development, a local setup has three pieces:
+
+```text
+VON Network      local development Indy Node network and ledger browser
+Indy VDR proxy   Rust-side ledger reader and DID resolver endpoint
+Typesec adapter  DidResolver implementation that maps VDR JSON to DidDocument
+```
+
+The local ledger can be started outside this repo:
+
+```sh
+git clone https://github.com/bcgov/von-network.git
+cd von-network
+./manage build
+REGISTER_NEW_DIDS=True ./manage start
+curl -fsS http://localhost:9000/genesis -o /tmp/von-genesis.txn
+```
+
+VON's browser is normally available at `http://localhost:9000`. Its README
+describes it as development-only infrastructure and exposes a `/genesis`
+endpoint for clients. With `REGISTER_NEW_DIDS=True`, the browser can also
+enable the local "Authenticate a New DID" flow for writing sandbox DIDs through
+a known trust anchor.
+
+Indy VDR can then read the local ledger:
+
+```sh
+git clone https://github.com/hyperledger-indy/indy-vdr.git
+cd indy-vdr
+cargo build --bin indy-vdr-proxy
+./target/debug/indy-vdr-proxy -p 9001 -g /tmp/von-genesis.txn
+```
+
+Smoke tests:
+
+```sh
+curl -fsS http://localhost:9001/genesis
+curl -fsS http://localhost:9001/nym/<UNQUALIFIED_DID>
+```
+
+Indy VDR also documents a DID resolver endpoint:
+
+```text
+GET /1.0/identifiers/{DID or DID_URL}
+```
+
+The future `IndyVdrResolver` should call that endpoint for qualified
+`did:indy` values, or `/nym/<DID>` for a simple local VON smoke test, then
+translate the ledger response into the local `DidDocument` model. After that,
+the prompt path is unchanged: DID resolution and cryptography happen at the
+edge, while Typesec policy still controls reveal and inference.
+
 ## What Arcade Does
 
 Arcade is closest to the agent-tool problem. It handles OAuth 2.0, API keys,
@@ -720,13 +910,14 @@ The integrations crate is intentionally outside `typesec-core`. Provider
 adapters need HTTP clients, JWT validation, provider-specific endpoints, and
 credential handling. The core crate should not own those dependencies.
 
-The crate currently contains four modules:
+The crate currently contains five modules:
 
 ```text
 http     small injectable JSON HTTP client abstraction
 jwt      OIDC/JWT verification and JWT-claims policy engine
 workos   WorkOS FGA policy engine
 arcade   Arcade-style tool authorization policy engine
+did      DID documents, encrypted prompt envelopes, and Ollama bridge
 ```
 
 The `http` module provides `ReqwestHttpClient` for production use plus
@@ -762,6 +953,19 @@ completed authorization:
 ```rust
 let arcade = ArcadeToolAuthEngine::new(arcade_api_key)
     .with_tool_mapping("gmail/list", "Gmail.ListEmails");
+```
+
+The DID module handles decentralized identifiers and encrypted prompt
+envelopes. It exposes a resolver trait and a key-store trait so real DID
+methods and production cryptography can be added without changing the Typesec
+capability path:
+
+```text
+DidResolver  -> DidDocument
+DidKeyStore  -> verify/decrypt envelope
+Gateway      -> SecureValue<Secret, String, GenericResource>
+PolicyEngine -> Capability<AiCanInfer, _> and Capability<CanReadSensitive, _>
+Ollama       -> receives plaintext only after typed authority exists
 ```
 
 These engines are not special cases in the capability system. They implement
@@ -927,6 +1131,23 @@ An allow exits successfully and prints an allow result. A deny exits with status
 `1`. A delegate exits with status `2`. That makes the command a simple policy
 oracle for external tools.
 
+For agent wrappers that should not parse human output, the same check can emit
+JSON:
+
+```sh
+cargo run -q -p typesec-cli -- check \
+  --policy policies/rbac-example.yaml \
+  --subject agent:data-pipeline \
+  --action read \
+  --resource reports/q1 \
+  --json
+```
+
+That prints a stable decision object with fields such as `decision`, `allowed`,
+`subject`, `action`, `resource`, and the detected `format`, while preserving the
+same exit codes. This closes the earlier machine-readable CLI gap and makes
+`typesec check --json` the recommended boundary for Python and shell agents.
+
 The format is detected from YAML shape unless `--format rbac` or
 `--format odrl` is passed explicitly. ODRL checks can receive a purpose:
 
@@ -939,9 +1160,9 @@ cargo run -q -p typesec-cli -- check \
   --purpose analytics
 ```
 
-One improvement noted in `docs/improvements.md` is to add a stable
-machine-readable mode, such as `typesec check --json`. Today Python can use exit
-codes, but parsing stdout is not ideal for long-term integrations.
+The Python tests exercise both the exit-code boundary and the JSON boundary, so
+the CLI contract is checked from the same subprocess seam that non-Rust agents
+use.
 
 # Examples
 
@@ -1266,6 +1487,16 @@ deployments may want generated labels from policy files, capability-bound
 declassification reasons, or audited release records that carry policy version
 and purpose.
 
+Tenth, replace the DID demo crypto with production DIDComm/JWE or HPKE
+implementations. The current `DemoDidKeyStore` is intentionally deterministic
+for tests. Real deployments need audited cryptography, key rotation, replay
+defense, and KMS/HSM integration.
+
+Eleventh, add real DID resolver backends. The trait boundary is in place for
+`did:key`, `did:web`, Universal Resolver, and Hyperledger Indy VDR. Those
+backends should stay in `typesec-integrations` so ledger and network
+dependencies do not leak into `typesec-core`.
+
 # Conclusion
 
 Typesec is a small system with a sharp idea: authorization should not only be a
@@ -1288,6 +1519,7 @@ policy combinators
 async secure agents
 OAuth/OIDC provider integrations
 WorkOS FGA and Arcade-style tool auth engines
+DID-wrapped encrypted prompt handling
 CLI policy checks
 Rust examples
 Python tool-gating example

@@ -29,13 +29,13 @@ The Kindle-facing EPUB path is generated from `title_stem` in
 `docs/book/metadata.yaml` and `[workspace.package].version` in `Cargo.toml`:
 
 ```text
-typesec (0.4.0).epub
+typesec (0.5.0).epub
 ```
 
 That versioned path must be a symlink to the stable EPUB:
 
 ```text
-docs/book/dist/typesec (0.4.0).epub -> typesec.epub
+docs/book/dist/typesec (0.5.0).epub -> typesec.epub
 ```
 
 Track the stable EPUB, PDF, MOBI, and `VERSION.md`. The versioned EPUB is a
@@ -45,10 +45,10 @@ generated symlink and `.gitignore` ignores future versioned EPUB names matching
 `VERSION.md` must contain:
 
 ```yaml
-kindle_name: typesec (0.4.0)
+kindle_name: typesec (0.5.0)
 built_at: YYYY-MM-DD
 epub_file: typesec.epub
-kindle_link: typesec (0.4.0).epub
+kindle_link: typesec (0.5.0).epub
 ```
 
 ## Metadata Rules
@@ -62,14 +62,14 @@ Typesec
 The Kindle/catalog title is versioned:
 
 ```text
-typesec (0.4.0)
+typesec (0.5.0)
 ```
 
 Keep those surfaces separate:
 
 - Cover, NCX, navigation title, and visible table of contents: `Typesec`
-- OPF `dc:title` and title-sort metadata: `typesec (0.4.0)`
-- Upload/delivery filename: `typesec (0.4.0).epub`
+- OPF `dc:title` and title-sort metadata: `typesec (0.5.0)`
+- Upload/delivery filename: `typesec (0.5.0).epub`
 - Dist marker: `VERSION.md`
 
 Do not hard-code the version in the manuscript or cover. The cover uses
@@ -118,7 +118,7 @@ The build script:
 
 1. Reads the workspace version from `Cargo.toml`.
 2. Reads `title_stem` from `docs/book/metadata.yaml`.
-3. Computes `kindle_name`, for example `typesec (0.4.0)`.
+3. Computes `kindle_name`, for example `typesec (0.5.0)`.
 4. Writes `docs/book/dist/VERSION.md`.
 5. Renders a temporary cover with `{{KINDLE_NAME}}` replaced.
 6. Builds a standalone cover PDF.
@@ -157,7 +157,7 @@ generate an extra empty `EPUB/text/title_page.xhtml` before the custom cover.
 After every build, run:
 
 ```sh
-docs/book/check_epub_metadata.sh docs/book/dist/typesec.epub 'typesec (0.4.0)'
+docs/book/check_epub_metadata.sh docs/book/dist/typesec.epub 'typesec (0.5.0)'
 ```
 
 The validator rejects:
@@ -193,13 +193,13 @@ Check the versioned EPUB link:
 
 ```sh
 ls -l docs/book/dist
-readlink 'docs/book/dist/typesec (0.4.0).epub'
+readlink 'docs/book/dist/typesec (0.5.0).epub'
 ```
 
 Expected result:
 
 ```text
-typesec (0.4.0).epub -> typesec.epub
+typesec (0.5.0).epub -> typesec.epub
 typesec.epub
 ```
 
@@ -212,7 +212,7 @@ Optional Calibre metadata check:
 Expected title and title sort:
 
 ```text
-typesec (0.4.0)
+typesec (0.5.0)
 ```
 
 If Calibre reports a permissions error while rendering metadata under
@@ -224,13 +224,13 @@ MOBI rebuild, rerun `docs/book/build.sh` with normal filesystem access.
 For local iCloud delivery, copy the versioned symlink path by name:
 
 ```sh
-cp 'docs/book/dist/typesec (0.4.0).epub' "$HOME/icloud/books/"
+cp 'docs/book/dist/typesec (0.5.0).epub' "$HOME/icloud/books/"
 ```
 
 This produces a regular EPUB file at:
 
 ```text
-~/icloud/books/typesec (0.4.0).epub
+~/icloud/books/typesec (0.5.0).epub
 ```
 
 That is intentional: the destination should preserve the versioned filename,
@@ -250,7 +250,7 @@ Before committing:
 ```sh
 git status --short
 git diff --stat
-docs/book/check_epub_metadata.sh docs/book/dist/typesec.epub 'typesec (0.4.0)'
+docs/book/check_epub_metadata.sh docs/book/dist/typesec.epub 'typesec (0.5.0)'
 ```
 
 The normal pushed set for book artifact changes includes:
@@ -262,7 +262,7 @@ The normal pushed set for book artifact changes includes:
 - `docs/book/dist/typesec.pdf`
 - `docs/book/dist/typesec.epub`
 - `docs/book/dist/typesec.mobi`
-- `docs/book/dist/typesec (0.4.0).epub` when its tracked symlink target or mode
+- `docs/book/dist/typesec (0.5.0).epub` when its tracked symlink target or mode
   changes.
 
 Leave unrelated `.codex-artifacts/` files untracked unless the user explicitly

@@ -2,8 +2,8 @@
 
 This directory contains runnable examples for the Typesec workspace. They show
 the same security idea at a few layers: typed Rust capabilities, contextual
-ODRL policy, graph writes through Grust/Sail, and a Python tool-gating wrapper
-that shells out to the Typesec CLI.
+ODRL policy, provider integrations, graph writes through Grust/Sail, and a
+Python tool-gating wrapper that shells out to the Typesec CLI.
 
 ## Install Typesec From This Repository
 
@@ -186,6 +186,43 @@ Check that it still compiles:
 cargo check -p typesec-cli --example provider_integrations
 ```
 
+## `did_messaging.rs`
+
+Path:
+
+```text
+examples/did_messaging.rs
+```
+
+This Rust example demonstrates a DID-wrapped encrypted prompt flow without a
+live ledger or Ollama server:
+
+1. Resolve sender and recipient DID documents.
+2. Verify the sender signature.
+3. Decrypt the payload for the local recipient DID.
+4. Protect the plaintext prompt as `SecureValue<Secret, String, GenericResource>`.
+5. Require `Capability<AiCanInfer, _>` and
+   `Capability<CanReadSensitive, _>` before sending plaintext to Ollama.
+
+The local `StaticDidResolver` and `DemoDidKeyStore` are test fixtures, not
+production DID infrastructure. Hyperledger Indy VDR, Universal Resolver,
+DIDComm/JWE, or KMS-backed key material should plug into the same traits.
+
+Run it:
+
+```sh
+cargo run -p typesec-cli --example did_messaging
+```
+
+Check that it still compiles:
+
+```sh
+cargo check -p typesec-cli --example did_messaging
+```
+
+See [`docs/did-messaging.md`](../docs/did-messaging.md) for the local
+Hyperledger Indy/VON Network setup and the `IndyVdrResolver` adapter shape.
+
 ## Company Graph Examples
 
 Directory:
@@ -222,7 +259,7 @@ cargo run -p typesec-cli -- check --policy policies/graph-corporate-example.yaml
   --resource employee/private/employee:nia
 ```
 
-The graph policy loader now uses Grust 0.4 typed graph support with Zod schemas
+The graph policy loader now uses Grust 0.5 typed graph support with Zod schemas
 at the YAML/JSON boundary, and the examples write validated graphs through
 Grust's typed backend path. That means the example policy is not just parsed as
 a loose property graph: `Agent`, `Role`, and `Employee` nodes are typed,
@@ -272,7 +309,7 @@ examples/company_graph/company_graph_grust_sail.rs
 This example uses published Grust crates:
 
 ```toml
-grust-graph = { version = "0.4.0", features = ["typed-zod-rs", "sail"] }
+grust-graph = { version = "0.5.0", features = ["typed-zod-rs", "sail"] }
 ```
 
 It builds a backend-neutral property graph through the `grust` facade. If a Sail

@@ -13,7 +13,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
 authors = ["typesec contributors"]
 license = "MIT OR Apache-2.0"
@@ -54,7 +54,7 @@ proc-macro2 = "1"
 
 # Glob matching for resource patterns
 glob = "0.3"
-grust-graph = { version = "0.4.0", path = "../grust/crates/grust", features = ["typed-zod-rs"] }
+grust-graph = { version = "0.5.0", path = "../grust/crates/grust", features = ["typed-zod-rs"] }
 
 [profile.release]
 lto = true

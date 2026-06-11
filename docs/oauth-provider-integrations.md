@@ -1,9 +1,10 @@
-# OAuth Provider Integrations
+# External Identity Integrations
 
-Typesec integrates with OAuth-based systems by treating them as policy engines
-or authenticators at the edge. OAuth/OIDC proves identity and stores delegated
-provider authority; Typesec turns allowed decisions into typed capabilities that
-the local tool code must hold.
+Typesec integrates with external identity systems by treating them as policy
+engines, authenticators, or secure-message gateways at the edge. OAuth/OIDC
+proves identity and stores delegated provider authority. DID messaging proves
+control of a decentralized identifier and protects payload transport. Typesec
+turns allowed decisions into typed capabilities that local tool code must hold.
 
 ## Crates and Features
 
@@ -11,7 +12,7 @@ Provider integrations live in `typesec-integrations` and are re-exported by the
 facade crate behind the `integrations` feature:
 
 ```toml
-typesec = { version = "0.4.0", features = ["integrations"] }
+typesec = { version = "0.5.0", features = ["integrations"] }
 ```
 
 The integrations crate currently provides:
@@ -23,6 +24,9 @@ The integrations crate currently provides:
   Fine-Grained Authorization checks.
 - `ArcadeToolAuthEngine`: checks whether a user has authorized an external tool
   such as Gmail, Slack, or GitHub.
+- `DidResolver`, `DidKeyStore`, `DidMessageGateway`, and `DidOllamaClient`:
+  verify DID-wrapped encrypted prompts and bridge them to `SecureValue` and
+  Ollama.
 - `ProtectedTool`: wraps local tool handlers so invocation requires a matching
   `Capability<P, R>`.
 
@@ -123,3 +127,57 @@ tool.invoke(&agent, &cap).await?;
 The important property is unchanged: provider checks remain runtime decisions,
 but the local tool cannot run unless those decisions have been converted into a
 typed Typesec capability.
+
+## DID Messaging Pattern
+
+DIDs are useful when an agent, service, or user needs a resolvable identifier
+whose document advertises verification keys and service endpoints. In Typesec,
+a DID proves the subject and helps decrypt the payload. It does not grant
+authority by itself.
+
+```text
+DID envelope
+  -> DidResolver resolves sender DID document
+  -> DidKeyStore verifies the sender signature
+  -> DidKeyStore decrypts the payload for the local recipient DID
+  -> DidMessageGateway returns VerifiedDidPrompt
+  -> VerifiedDidPrompt.prompt is SecureValue<Secret, String, GenericResource>
+```
+
+The verified DID string becomes the Typesec subject:
+
+```text
+subject:  did:key:z...
+action:   ai:infer
+resource: prompt/session/123
+```
+
+Policy still decides whether the prompt can be used:
+
+```rust
+use typesec::{
+    AiCanInfer, CanReadSensitive, Capability, PolicyEngine,
+    policy::mint_capability,
+};
+use typesec::integrations::{DidMessageGateway, DidOllamaClient};
+
+let verified = gateway.open_prompt(&envelope)?;
+
+let infer: Capability<AiCanInfer, _> =
+    mint_capability(engine, verified.subject.as_str(), &verified.resource)?;
+let read: Capability<CanReadSensitive, _> =
+    mint_capability(engine, verified.subject.as_str(), &verified.resource)?;
+
+let ollama = DidOllamaClient::new("http://localhost:11434", "llama3.2");
+let response = ollama.chat_verified_prompt(verified, &infer, &read)?;
+```
+
+`chat_verified_prompt` is the conservative mode: Typesec verifies and decrypts
+locally, then reveals the prompt only after both capabilities exist.
+`chat_wrapped_prompt` is the compatibility mode for a DID-aware Ollama fork that
+expects the whole envelope under the `did_envelope` field.
+
+The included `StaticDidResolver` and `DemoDidKeyStore` are deterministic local
+test utilities. `DemoDidKeyStore` is not production cryptography. Production
+work should implement the same traits with DIDComm/JWE, HPKE, an HSM/KMS-backed
+key store, Hyperledger Indy VDR, or a Universal Resolver client.
