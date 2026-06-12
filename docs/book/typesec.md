@@ -1071,6 +1071,16 @@ GenericResource>`. Transport adapters such as `A2aTypeDidAdapter`,
 A2A, ACP, BAND, and HTTPS responsible for their own lifecycle while TypeDID
 owns cryptographic sender/recipient binding and the Typesec policy handoff.
 
+The same boundary applies to Python agent frameworks. LangChain and Pydantic AI
+should not reimplement DID cryptography or become policy engines. Instead, a
+Rust `TypeDidGateway` or future native Python binding should produce a verified
+message view, and framework adapters should use `typesec check --json` or the
+native Python gate to decide whether a tool may see the payload. The
+`examples/typedid_framework_adapters.py` example shows this shape without
+depending on either framework: a LangChain-style middleware wrapper and a
+Pydantic-style dependency object both gate the verified TypeDID message before
+tool invocation.
+
 These engines are not special cases in the capability system. They implement
 the same `PolicyEngine` trait as RBAC, ODRL, and graph policies. That is the
 point: external OAuth and enterprise authorization decisions become ordinary

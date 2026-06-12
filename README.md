@@ -244,6 +244,7 @@ VDR, or a Universal Resolver client behind the same traits.
 See [`docs/typesec-and-auth-frameworks.md`](docs/typesec-and-auth-frameworks.md),
 [`docs/oauth-provider-integrations.md`](docs/oauth-provider-integrations.md),
 [`docs/did-messaging.md`](docs/did-messaging.md),
+[`docs/typedid-ecosystem.md`](docs/typedid-ecosystem.md),
 [`docs/typedid-agent-communications.md`](docs/typedid-agent-communications.md), and
 [`examples/provider_integrations.rs`](examples/provider_integrations.rs).
 

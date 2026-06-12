@@ -255,6 +255,33 @@ Check that it still compiles:
 cargo check -p typesec-cli --example typedid_agent_communications
 ```
 
+## `typedid_framework_adapters.py`
+
+Path:
+
+```text
+examples/typedid_framework_adapters.py
+```
+
+This Python example demonstrates how LangChain-style middleware and
+Pydantic-style dependencies can consume a verified TypeDID message without
+owning DID cryptography. The Rust `TypeDidGateway` or a future native Python
+binding should verify and decrypt the envelope first; the framework adapter
+then uses `typesec check --json` to decide whether the protected payload can be
+revealed to a tool.
+
+Run it:
+
+```sh
+uv run python examples/typedid_framework_adapters.py
+```
+
+Run the smoke tests:
+
+```sh
+uv run python -m unittest tests/python/test_typedid_framework_adapters.py
+```
+
 ## Company Graph Examples
 
 Directory:
@@ -474,5 +501,6 @@ cargo check -p typesec-cli --example graph_policy_schema
 cargo check -p typesec-cli --example company_graph_grust_sail
 uv run python examples/company_graph/langchain_company_graph.py
 uv run python examples/company_graph/pydantic_company_graph.py
+uv run python examples/typedid_framework_adapters.py
 uv run python -m unittest discover -s tests/python
 ```

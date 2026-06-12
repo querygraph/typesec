@@ -7,6 +7,9 @@ by release version, then by the date the logical change landed.
 
 ### 2026-06-12
 
+- Added a TypeDID ecosystem strategy covering LangChain, Pydantic AI, MCP,
+  BAND, WorkOS, and Arcade, plus Python framework-adapter examples and smoke
+  tests that use `typesec check --json` as the policy seam.
 - Added repository guidance requiring completed units of work to be
   changelogged and committed separately before starting work from a new prompt.
 - Implemented TypeDID agent communications with DID-wrapped send and

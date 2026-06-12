@@ -161,7 +161,8 @@ cargo run -p typesec-cli --example typedid_agent_communications
 ```
 
 See [`typedid-agent-communications.md`](typedid-agent-communications.md) for
-the design details and adapter guidance.
+the protocol details and [`typedid-ecosystem.md`](typedid-ecosystem.md) for
+LangChain, Pydantic AI, MCP, BAND, WorkOS, and Arcade strategy.
 
 ## DID Shapes to Support
 
