@@ -118,7 +118,7 @@ let tool = ProtectedTool::<CanExecute, _, _>::new(
 );
 
 let agent = SecureAgent::new(engine)
-    .authenticate(Credentials::new("user@example.com", "verified-token"))?;
+    .authenticate_with(Credentials::new("user@example.com", token), &jwt_auth)?;
 let cap: Capability<CanExecute, GenericResource> =
     agent.request_capability(&GenericResource::new("gmail/list", "tool")).await?;
 tool.invoke(&agent, &cap).await?;
@@ -177,7 +177,9 @@ locally, then reveals the prompt only after both capabilities exist.
 `chat_wrapped_prompt` is the compatibility mode for a DID-aware Ollama fork that
 expects the whole envelope under the `did_envelope` field.
 
-The included `StaticDidResolver` and `DemoDidKeyStore` are deterministic local
-test utilities. `DemoDidKeyStore` is not production cryptography. Production
+The included `StaticDidResolver` and `Ed25519DidKeyStore` cover local DID
+examples with real signatures, key agreement, and authenticated encryption.
+`DemoDidKeyStore` is a non-cryptographic test utility available only in tests or
+behind the `demo-crypto` feature. Production
 work should implement the same traits with DIDComm/JWE, HPKE, an HSM/KMS-backed
 key store, Hyperledger Indy VDR, or a Universal Resolver client.

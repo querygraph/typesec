@@ -18,10 +18,12 @@
 //!         └─ Err(CapabilityError::Denied { reason })
 //! ```
 //!
-//! Every `check()` call is recorded in the [`AuditEvent`] log via `tracing`.
-//! You can attach a structured subscriber to ship these to any SIEM.
+//! Every `check()` call is recorded as an [`AuditEvent`] through the configured
+//! [`AuditSink`]. The default sink emits via `tracing` — attach a structured
+//! subscriber to ship these to any SIEM, or install a custom sink with
+//! [`set_audit_sink`] for a guaranteed write path.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock, RwLock};
 
 use tracing::info;
 
@@ -109,6 +111,46 @@ impl AuditEvent {
     }
 }
 
+/// Destination for audit events.
+///
+/// The default sink ([`TracingAuditSink`]) logs through `tracing`, which is
+/// best-effort: with no subscriber installed the trail silently vanishes.
+/// Security-sensitive deployments should install a sink with a durable write
+/// path (file, database, SIEM forwarder) via [`set_audit_sink`].
+pub trait AuditSink: Send + Sync {
+    /// Record one policy decision.
+    fn record(&self, event: &AuditEvent);
+}
+
+/// Default [`AuditSink`] that emits events via `tracing::info!`.
+pub struct TracingAuditSink;
+
+impl AuditSink for TracingAuditSink {
+    fn record(&self, event: &AuditEvent) {
+        event.log();
+    }
+}
+
+fn audit_sink_cell() -> &'static RwLock<Arc<dyn AuditSink>> {
+    static SINK: OnceLock<RwLock<Arc<dyn AuditSink>>> = OnceLock::new();
+    SINK.get_or_init(|| RwLock::new(Arc::new(TracingAuditSink)))
+}
+
+/// Install a process-wide audit sink, replacing the previous one.
+///
+/// All subsequent [`mint_capability`] decisions are recorded through `sink`.
+pub fn set_audit_sink(sink: Arc<dyn AuditSink>) {
+    *audit_sink_cell().write().expect("audit sink lock poisoned") = sink;
+}
+
+/// Record an event through the configured audit sink.
+pub(crate) fn record_audit(event: &AuditEvent) {
+    audit_sink_cell()
+        .read()
+        .expect("audit sink lock poisoned")
+        .record(event);
+}
+
 /// The core runtime policy interface.
 ///
 /// Implementors (e.g., `RbacEngine`, `OdrlEngine`) evaluate a (subject, action,
@@ -177,7 +219,7 @@ pub fn mint_capability<P: Permission, R: Resource>(
         result: result.clone(),
         timestamp: now_iso8601(),
     };
-    event.log();
+    record_audit(&event);
 
     match result {
         PolicyResult::Allow => Ok(Capability::new_unchecked(subject, resource_id)),
@@ -206,12 +248,7 @@ impl<P: PolicyEngine> PolicyEngine for FallbackEngine<P> {
 }
 
 fn now_iso8601() -> String {
-    // Use a simple timestamp. In production you'd use chrono here.
-    // Kept dependency-free in core.
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| format!("epoch+{}s", d.as_secs()))
-        .unwrap_or_else(|_| "unknown".to_owned())
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
 
 #[cfg(test)]

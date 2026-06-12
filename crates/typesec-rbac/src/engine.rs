@@ -18,13 +18,52 @@ use crate::model::RbacPolicy;
 /// the sizes of policies used in AI agent deployments.
 pub struct RbacEngine {
     /// Subject → set of effective (permission, resource_pattern) pairs.
-    subject_grants: HashMap<String, Vec<Grant>>,
+    subject_grants: HashMap<String, Vec<CompiledGrant>>,
 }
 
 #[derive(Debug, Clone)]
 struct Grant {
     permission: String,
     resource_patterns: Vec<String>,
+}
+
+/// A grant with its glob patterns validated and compiled once at load time.
+///
+/// Compiling here (rather than per `check()`) both surfaces pattern typos as
+/// load errors — a malformed pattern would otherwise silently never match,
+/// i.e. silently deny — and avoids re-parsing the glob on every check.
+#[derive(Debug, Clone)]
+struct CompiledGrant {
+    permission: String,
+    resource_patterns: Vec<ResourcePattern>,
+}
+
+#[derive(Debug, Clone)]
+enum ResourcePattern {
+    /// The literal `"*"` — matches every resource, including across `/`.
+    Any,
+    /// A compiled glob. Note glob `*` does not cross `/` separators:
+    /// `reports/*` matches `reports/q1` but not `reports/2024/q1` (use
+    /// `reports/**` for that).
+    Glob(Pattern),
+}
+
+impl ResourcePattern {
+    fn compile(pattern: &str) -> Result<Self, String> {
+        if pattern == "*" {
+            return Ok(Self::Any);
+        }
+        Pattern::new(pattern)
+            .map(Self::Glob)
+            .map_err(|e| format!("invalid resource pattern '{pattern}': {e}"))
+    }
+
+    fn matches(&self, resource: &str) -> bool {
+        match self {
+            Self::Any => true,
+            Self::Glob(pattern) => pattern.matches(resource),
+        }
+    }
 }
 
 impl RbacEngine {
@@ -44,13 +83,23 @@ impl RbacEngine {
             map
         };
 
-        // Step 2: build subject → grants mapping.
-        let mut subject_grants: HashMap<String, Vec<Grant>> = HashMap::new();
+        // Step 2: build subject → grants mapping, compiling patterns up front
+        // so invalid globs fail the policy load instead of silently denying.
+        let mut subject_grants: HashMap<String, Vec<CompiledGrant>> = HashMap::new();
         for assignment in &policy.assignments {
-            let mut all_grants: Vec<Grant> = Vec::new();
+            let mut all_grants: Vec<CompiledGrant> = Vec::new();
             for role_name in &assignment.roles {
                 if let Some(grants) = effective_roles.get(role_name) {
-                    all_grants.extend(grants.iter().cloned());
+                    for grant in grants {
+                        all_grants.push(CompiledGrant {
+                            permission: grant.permission.clone(),
+                            resource_patterns: grant
+                                .resource_patterns
+                                .iter()
+                                .map(|p| ResourcePattern::compile(p))
+                                .collect::<Result<_, _>>()?,
+                        });
+                    }
                 }
             }
             subject_grants
@@ -83,7 +132,7 @@ impl PolicyEngine for RbacEngine {
         for grant in grants {
             if grant.permission == action {
                 for pattern in &grant.resource_patterns {
-                    if matches_glob(pattern, resource) {
+                    if pattern.matches(resource) {
                         return PolicyResult::Allow;
                     }
                 }
@@ -133,15 +182,6 @@ fn flatten_role_inner(
     }
 
     grants
-}
-
-/// Match a resource string against a glob pattern.
-/// Uses the `glob` crate — patterns like `"reports/*"` or `"*"`.
-fn matches_glob(pattern: &str, resource: &str) -> bool {
-    if pattern == "*" {
-        return true;
-    }
-    Pattern::new(pattern).is_ok_and(|p| p.matches(resource))
 }
 
 #[cfg(test)]
@@ -227,6 +267,25 @@ assignments:
         assert_eq!(
             e.check("agent:superuser", "delete", "anything"),
             PolicyResult::Allow
+        );
+    }
+
+    #[test]
+    fn invalid_resource_pattern_fails_policy_load() {
+        let yaml = r#"
+roles:
+  - name: broken
+    permissions: [read]
+    resources: ["reports/[unclosed"]
+
+assignments:
+  - subject: "agent:x"
+    roles: [broken]
+"#;
+        let result = RbacEngine::from_yaml(yaml);
+        assert!(
+            result.is_err(),
+            "malformed glob must fail at load, not silently deny"
         );
     }
 

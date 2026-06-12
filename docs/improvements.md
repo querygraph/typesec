@@ -16,7 +16,7 @@ This note reviews the first Claude draft and records the next useful upgrades.
 - Add compile-fail tests with `trybuild` for the central promise: unauthenticated agents cannot request capabilities, actions cannot execute without capabilities, and lower capabilities cannot coerce upward.
 - Generate typed permission/resource modules from policy files, then compile downstream examples against generated code so policy renames break at compile time.
 - Split policy `Deny`, `Delegate`, and constraint failure semantics more explicitly. Today `mint_capability` treats delegation as an error; composed deployments should make that fallback path first-class.
-- Consider a revocation/expiry story for capabilities. The current token proves a decision at mint time, but long-running agents may need epoch-bound or lease-bound capabilities.
+- Extend capability leases with revocation epochs. Capabilities now expire after a short lease and consuming APIs reject stale tokens, but long-running agents still need policy-version or epoch-bound revocation.
 - Add an optional PyO3 crate later if Python integrations need in-process checks, but keep the CLI boundary first because it is easy to sandbox and test.
 
 ## Python And LangChain Testing

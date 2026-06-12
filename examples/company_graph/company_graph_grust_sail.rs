@@ -209,11 +209,11 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let engine = Arc::new(GraphPolicyEngine::from_yaml(POLICY)?);
 
     let executive = SecureAgent::new(engine.clone())
-        .authenticate(Credentials::new("agent:executive-chief", "tok"))?;
+        .authenticate_unverified(Credentials::new("agent:executive-chief", "tok"))?;
     let hr = SecureAgent::new(engine.clone())
-        .authenticate(Credentials::new("agent:hr-onboarding", "tok"))?;
-    let employee_self_service =
-        SecureAgent::new(engine).authenticate(Credentials::new("agent:employee-nia", "tok"))?;
+        .authenticate_unverified(Credentials::new("agent:hr-onboarding", "tok"))?;
+    let employee_self_service = SecureAgent::new(engine)
+        .authenticate_unverified(Credentials::new("agent:employee-nia", "tok"))?;
 
     let evelyn = Employee {
         id: "employee:evelyn",

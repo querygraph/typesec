@@ -95,12 +95,35 @@ impl_join!(Secret, Internal => Secret);
 impl_join!(Secret, Sensitive => Secret);
 impl_join!(Secret, Secret => Secret);
 
+/// Error returned when a capability does not authorize access to a protected value.
+#[derive(Debug, thiserror::Error)]
+pub enum SecureAccessError {
+    /// The capability lease has expired.
+    #[error(transparent)]
+    Capability(#[from] crate::CapabilityUseError),
+    /// The capability covers a different resource instance than the protected value.
+    #[error(
+        "capability for resource '{capability_resource}' does not cover protected value from '{value_resource}'"
+    )]
+    ResourceMismatch {
+        /// Resource id the capability was minted for.
+        capability_resource: String,
+        /// Resource id the protected value is tied to.
+        value_resource: String,
+    },
+}
+
 /// Data protected by a type-level privacy label and resource type.
 ///
 /// The inner value is private. Callers can transform it with [`map`][Self::map]
 /// and [`zip`][Self::zip], but cannot observe it unless it is public or they hold
-/// an appropriate capability for resource `R`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// an appropriate capability for resource `R` *with a matching resource id*.
+///
+/// `SecureValue` deliberately does **not** implement `PartialEq` or derive
+/// `Debug` over the inner value: equality would act as an oracle for guessing
+/// protected contents, and `Debug` would print them into logs. The manual
+/// `Debug` impl below redacts the payload.
+#[derive(Clone)]
 pub struct SecureValue<L: PrivacyLevel, T, R: Resource> {
     value: T,
     resource_id: String,
@@ -160,21 +183,60 @@ impl<L: PrivacyLevel, T, R: Resource> SecureValue<L, T, R> {
     }
 
     /// Reveal protected data with sensitive-read authority.
-    pub fn reveal(self, _capability: &Capability<CanReadSensitive, R>) -> T {
-        self.value
+    ///
+    /// The capability must have been minted for the *same resource instance*
+    /// this value is tied to — a capability for `customer/2` cannot reveal
+    /// data protected under `customer/1`, even though both share the resource
+    /// type `R`.
+    pub fn reveal(
+        self,
+        capability: &Capability<CanReadSensitive, R>,
+    ) -> Result<T, SecureAccessError> {
+        capability.ensure_active()?;
+        self.check_capability_resource(capability.resource_id())?;
+        Ok(self.value)
     }
 
     /// Lower the label to public with explicit declassification authority.
+    ///
+    /// Like [`reveal`][Self::reveal], the capability's resource id must match
+    /// the protected value's resource id.
     pub fn declassify(
         self,
-        _capability: &Capability<CanDeclassify, R>,
-    ) -> SecureValue<Public, T, R> {
-        SecureValue {
+        capability: &Capability<CanDeclassify, R>,
+    ) -> Result<SecureValue<Public, T, R>, SecureAccessError> {
+        capability.ensure_active()?;
+        self.check_capability_resource(capability.resource_id())?;
+        Ok(SecureValue {
             value: self.value,
             resource_id: self.resource_id,
             _label: PhantomData,
             _resource: PhantomData,
+        })
+    }
+
+    fn check_capability_resource(
+        &self,
+        capability_resource: &str,
+    ) -> Result<(), SecureAccessError> {
+        if capability_resource == self.resource_id {
+            Ok(())
+        } else {
+            Err(SecureAccessError::ResourceMismatch {
+                capability_resource: capability_resource.to_owned(),
+                value_resource: self.resource_id.clone(),
+            })
         }
+    }
+}
+
+impl<L: PrivacyLevel, T, R: Resource> std::fmt::Debug for SecureValue<L, T, R> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SecureValue")
+            .field("label", &L::name())
+            .field("resource_id", &self.resource_id)
+            .field("value", &"<redacted>")
+            .finish()
     }
 }
 
@@ -189,10 +251,11 @@ impl<T, R: Resource> SecureValue<Public, T, R> {
 mod tests {
     use super::*;
     use crate::{
-        capability::Capability,
+        capability::{Capability, DEFAULT_CAPABILITY_TTL},
         permissions::{CanDeclassify, CanReadSensitive},
         resource::GenericResource,
     };
+    use std::time::{Duration, SystemTime};
 
     #[test]
     fn map_preserves_label_and_resource() {
@@ -238,7 +301,7 @@ mod tests {
         let cap: Capability<CanReadSensitive, GenericResource> =
             Capability::new_unchecked("agent:test", "customer/1");
 
-        assert_eq!(secret.reveal(&cap), "ssn");
+        assert_eq!(secret.reveal(&cap).expect("matching resource"), "ssn");
     }
 
     #[test]
@@ -249,8 +312,65 @@ mod tests {
         let cap: Capability<CanDeclassify, GenericResource> =
             Capability::new_unchecked("agent:test", "metric/1");
 
-        let public = sensitive.declassify(&cap);
+        let public = sensitive.declassify(&cap).expect("matching resource");
 
         assert_eq!(public.into_public(), 42);
+    }
+
+    #[test]
+    fn reveal_rejects_capability_for_other_resource_instance() {
+        let resource = GenericResource::new("customer/1", "customer");
+        let secret: SecureValue<Secret, &str, GenericResource> =
+            SecureValue::protect("ssn", &resource);
+        // Same resource *type*, different *instance*:
+        let cap: Capability<CanReadSensitive, GenericResource> =
+            Capability::new_unchecked("agent:test", "customer/2");
+
+        assert!(matches!(
+            secret.reveal(&cap),
+            Err(SecureAccessError::ResourceMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn declassify_rejects_capability_for_other_resource_instance() {
+        let resource = GenericResource::new("metric/1", "metric");
+        let sensitive: SecureValue<Sensitive, usize, GenericResource> =
+            SecureValue::protect(42, &resource);
+        let cap: Capability<CanDeclassify, GenericResource> =
+            Capability::new_unchecked("agent:test", "metric/other");
+
+        assert!(matches!(
+            sensitive.declassify(&cap),
+            Err(SecureAccessError::ResourceMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn debug_redacts_protected_value() {
+        let resource = GenericResource::new("customer/1", "customer");
+        let secret: SecureValue<Secret, &str, GenericResource> =
+            SecureValue::protect("ssn-123-45-6789", &resource);
+
+        let rendered = format!("{secret:?}");
+        assert!(!rendered.contains("ssn-123-45-6789"));
+        assert!(rendered.contains("<redacted>"));
+    }
+
+    #[test]
+    fn reveal_rejects_expired_capability() {
+        let resource = GenericResource::new("customer/1", "customer");
+        let secret: SecureValue<Secret, &str, GenericResource> =
+            SecureValue::protect("ssn", &resource);
+        let issued_at = SystemTime::now()
+            .checked_sub(DEFAULT_CAPABILITY_TTL + Duration::from_secs(1))
+            .expect("time subtraction");
+        let cap: Capability<CanReadSensitive, GenericResource> =
+            Capability::new_with_issued_at("agent:test", "customer/1", issued_at);
+
+        assert!(matches!(
+            secret.reveal(&cap),
+            Err(SecureAccessError::Capability(_))
+        ));
     }
 }

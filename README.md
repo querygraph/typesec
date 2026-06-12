@@ -134,13 +134,17 @@ policies:
 // 1. Create agent (Unauthenticated).
 let agent = SecureAgent::new(Arc::new(rbac_engine));
 
-// 2. Authenticate → type transitions to Authenticated.
-let agent = agent.authenticate(Credentials::new("agent:bot", "token"))?;
+// 2. Authenticate → type transitions to Authenticated. The Authenticator
+//    (e.g. JwtAuthenticator) verifies the token and returns the verified
+//    subject; authenticate_unverified() exists for tests and demos.
+let agent = agent.authenticate_with(Credentials::new("agent:bot", token), &jwt_auth)?;
 
 // 3. Request a capability. Policy checked; cap minted on Allow.
 let cap: Capability<CanRead, Report> = agent.request_capability(&report).await?;
+// Capabilities are short-lived leases; protected APIs reject expired caps.
 
-// 4. Execute. The cap is compile-time proof of permission.
+// 4. Execute. The cap is compile-time proof of permission kind; at runtime
+//    it must also match this agent's subject and this exact resource id.
 agent.execute(&cap, &report, |r| Box::pin(async move {
     println!("reading: {}", r.resource_id());
     Ok(())
@@ -211,10 +215,13 @@ DID envelope
   -> DidOllamaClient can call Ollama or forward the wrapped envelope
 ```
 
-The repository ships `StaticDidResolver` and `DemoDidKeyStore` for deterministic
-local tests. Production deployments should replace those with DIDComm/JWE,
-HPKE, an HSM/KMS-backed key store, Hyperledger Indy VDR, or a Universal
-Resolver client behind the same traits.
+The repository ships `Ed25519DidKeyStore` (Ed25519 signatures, X25519 key
+agreement, ChaCha20-Poly1305 payload encryption) as the production key store,
+plus `StaticDidResolver` for local resolution. A deterministic,
+**non-cryptographic** `DemoDidKeyStore` exists behind the `demo-crypto`
+feature for tests only. Deployments with stronger requirements can replace
+these with DIDComm/JWE, HPKE, an HSM/KMS-backed key store, Hyperledger Indy
+VDR, or a Universal Resolver client behind the same traits.
 
 See [`docs/typesec-and-auth-frameworks.md`](docs/typesec-and-auth-frameworks.md),
 [`docs/oauth-provider-integrations.md`](docs/oauth-provider-integrations.md),
@@ -329,8 +336,9 @@ let email: SecureValue<Sensitive, String, CustomerRecord> =
 
 let domain = email.map(|addr| addr.split('@').last().unwrap_or("").to_owned());
 
-// Requires Capability<CanDeclassify, CustomerRecord>.
-let public_domain = domain.declassify(&declassify_cap).into_public();
+// Requires Capability<CanDeclassify, CustomerRecord> minted for this
+// customer's resource id — a capability for another customer is rejected.
+let public_domain = domain.declassify(&declassify_cap)?.into_public();
 ```
 
 ---

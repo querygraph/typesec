@@ -30,16 +30,29 @@ impl SecureAgent<Unauthenticated> {
         }
     }
 
-    /// Authenticate the agent.
+    /// Authenticate the agent against a credential verifier.
     ///
-    /// On success, returns `SecureAgent<Authenticated>`. The unauthenticated
+    /// On success, returns `SecureAgent<Authenticated>` whose subject is the
+    /// *verified* identity returned by the authenticator. The unauthenticated
     /// agent is *consumed* — you can't hold onto the unauthenticated handle
     /// after calling this.
-    pub fn authenticate(
+    pub fn authenticate_with(
+        self,
+        credentials: Credentials,
+        authenticator: &dyn typesec_core::typestate::Authenticator,
+    ) -> Result<SecureAgent<Authenticated>, AgentError> {
+        let inner = self.inner.authenticate_with(credentials, authenticator)?;
+        Ok(SecureAgent { inner })
+    }
+
+    /// Authenticate *without verifying the token* — the claimed subject is
+    /// trusted as-is. For examples, tests, and out-of-band identity only;
+    /// production code should use [`authenticate_with`][Self::authenticate_with].
+    pub fn authenticate_unverified(
         self,
         credentials: Credentials,
     ) -> Result<SecureAgent<Authenticated>, AgentError> {
-        let inner = self.inner.authenticate(credentials)?;
+        let inner = self.inner.authenticate_unverified(credentials)?;
         Ok(SecureAgent { inner })
     }
 }
@@ -89,6 +102,12 @@ impl SecureAgent<Authenticated> {
     /// capability. If you don't have a capability, you can't call this method
     /// (the type system ensures it).
     ///
+    /// The phantom types prove the *kind* of access; two runtime checks bind
+    /// the proof to this call: the capability must have been minted for this
+    /// agent's subject (no confused-deputy use of another agent's token), and
+    /// for this exact resource instance (a cap for `reports/q1` cannot act on
+    /// `reports/q2`).
+    ///
     /// This is different from:
     /// ```rust,ignore
     /// // ❌ Guard-based — the check can be skipped, the condition forgotten.
@@ -109,6 +128,22 @@ impl SecureAgent<Authenticated> {
         F: FnOnce(&R) -> Fut,
         Fut: std::future::Future<Output = Result<(), crate::executor::TaskError>>,
     {
+        if cap.subject() != self.subject() {
+            return Err(crate::executor::TaskError::CapabilityMismatch(format!(
+                "capability was minted for subject '{}', not '{}'",
+                cap.subject(),
+                self.subject()
+            )));
+        }
+        if cap.resource_id() != resource.resource_id() {
+            return Err(crate::executor::TaskError::CapabilityMismatch(format!(
+                "capability covers resource '{}', not '{}'",
+                cap.resource_id(),
+                resource.resource_id()
+            )));
+        }
+        cap.ensure_active()?;
+
         info!(
             subject = %self.subject(),
             permission = %Capability::<P, R>::permission_name(),
@@ -203,7 +238,7 @@ mod tests {
     async fn full_flow_allow() {
         let agent = SecureAgent::new(Arc::new(AllowAll));
         let agent = agent
-            .authenticate(Credentials::new("agent:test", "tok"))
+            .authenticate_unverified(Credentials::new("agent:test", "tok"))
             .expect("auth ok");
         let resource = GenericResource::new("reports/q1", "report");
         let cap: Capability<CanRead, GenericResource> = agent
@@ -217,7 +252,7 @@ mod tests {
     async fn denied_request_returns_error() {
         let agent = SecureAgent::new(Arc::new(DenyAll));
         let agent = agent
-            .authenticate(Credentials::new("agent:test", "tok"))
+            .authenticate_unverified(Credentials::new("agent:test", "tok"))
             .expect("auth ok");
         let resource = GenericResource::new("reports/q1", "report");
         let result: Result<Capability<CanRead, GenericResource>, _> =
@@ -229,7 +264,7 @@ mod tests {
     async fn execute_requires_capability() {
         let agent = SecureAgent::new(Arc::new(AllowAll));
         let agent = agent
-            .authenticate(Credentials::new("agent:test", "tok"))
+            .authenticate_unverified(Credentials::new("agent:test", "tok"))
             .expect("auth ok");
         let resource = GenericResource::new("reports/q1", "report");
         let cap: Capability<CanRead, GenericResource> =
@@ -250,5 +285,50 @@ mod tests {
             .expect("execute ok");
 
         assert!(executed.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn execute_rejects_capability_for_other_resource() {
+        let agent = SecureAgent::new(Arc::new(AllowAll));
+        let agent = agent
+            .authenticate_unverified(Credentials::new("agent:test", "tok"))
+            .expect("auth ok");
+        let q1 = GenericResource::new("reports/q1", "report");
+        let q2 = GenericResource::new("reports/q2", "report");
+        let cap: Capability<CanRead, GenericResource> =
+            agent.request_capability(&q1).await.expect("cap ok");
+
+        // Same resource type, different instance — must be rejected.
+        let result = agent
+            .execute(&cap, &q2, |_r| Box::pin(async { Ok(()) }))
+            .await;
+        assert!(matches!(
+            result,
+            Err(crate::executor::TaskError::CapabilityMismatch(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn execute_rejects_capability_for_other_subject() {
+        let resource = GenericResource::new("reports/q1", "report");
+
+        // Mint a capability as agent:other...
+        let other = SecureAgent::new(Arc::new(AllowAll))
+            .authenticate_unverified(Credentials::new("agent:other", "tok"))
+            .expect("auth ok");
+        let cap: Capability<CanRead, GenericResource> =
+            other.request_capability(&resource).await.expect("cap ok");
+
+        // ...and try to use it as agent:test.
+        let agent = SecureAgent::new(Arc::new(AllowAll))
+            .authenticate_unverified(Credentials::new("agent:test", "tok"))
+            .expect("auth ok");
+        let result = agent
+            .execute(&cap, &resource, |_r| Box::pin(async { Ok(()) }))
+            .await;
+        assert!(matches!(
+            result,
+            Err(crate::executor::TaskError::CapabilityMismatch(_))
+        ));
     }
 }

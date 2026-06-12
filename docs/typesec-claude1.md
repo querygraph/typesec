@@ -369,7 +369,7 @@ assert!(result.is_err());
 // RBAC policy: agent:writer has `write` on data/*, no explicit `read`.
 let inner = Arc::new(RbacEngine::from_yaml(RBAC_WRITER_ONLY).expect("rbac"));
 let engine: Arc<dyn PolicyEngine> = Arc::new(LatticeEngine::new(inner));
-let agent = SecureAgent::new(engine).authenticate(...)?;
+let agent = SecureAgent::new(engine).authenticate_unverified(...)?;
 // CanWrite ⊇ CanRead — lattice promotes the denied read to Allow:
 let cap = agent.request_capability::<CanRead, _>(&resource).await.expect("lattice promotes");
 ```

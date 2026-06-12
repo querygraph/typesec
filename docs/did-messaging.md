@@ -10,16 +10,20 @@ The integration lives in `typesec-integrations::did` and provides:
 - `Did`, `DidDocument`, `VerificationMethod`, and `DidService` for the local
   DID document model.
 - `DidResolver` and `StaticDidResolver` as the resolver boundary.
-- `DidKeyStore` and `DemoDidKeyStore` as the signing/encryption boundary.
+- `DidKeyStore`, `Ed25519DidKeyStore`, and optional `DemoDidKeyStore` as the
+  signing/encryption boundary.
 - `DidEnvelope` and `DidMessageGateway` for DID-wrapped encrypted prompts.
 - `DidOllamaClient` for sending verified prompts to Ollama or forwarding a
   wrapped prompt to a DID-aware Ollama fork.
+- `DidMessageReference` for binding a reply envelope to the exact signed prompt
+  envelope that produced it.
 
-The current `DemoDidKeyStore` is deterministic and only intended for local tests
-and examples. It is deliberately isolated behind the DID module so a production
-implementation can replace it with DIDComm/JWE, HPKE, an HSM/KMS-backed key
-store, Hyperledger Indy VDR, or a Universal Resolver client without changing the
-Typesec capability path.
+`Ed25519DidKeyStore` is the default local implementation: Ed25519 signatures,
+X25519 key agreement, and ChaCha20-Poly1305 payload encryption. The deterministic
+`DemoDidKeyStore` is non-cryptographic and only compiled in tests or with the
+`demo-crypto` feature. Production deployments can also replace the key and
+resolver traits with DIDComm/JWE, HPKE, HSM/KMS-backed keys, Hyperledger Indy
+VDR, or a Universal Resolver client without changing the Typesec capability path.
 
 ## Flow
 
@@ -53,22 +57,19 @@ cargo run -p typesec-cli --example did_messaging
 The example creates two local `did:key` identifiers:
 
 ```rust
-let alice = Did::key(b"alice");
-let gateway_did = Did::key(b"typesec-ollama-gateway");
+let alice_key = Ed25519DidKey::from_seed(b"alice");
+let gateway_key = Ed25519DidKey::from_seed(b"typesec-ollama-gateway");
+
+let alice = Did::key(alice_key.signing_public());
+let gateway_did = Did::key(gateway_key.signing_public());
 ```
 
 It registers local DID documents with `StaticDidResolver`:
 
 ```rust
 let resolver = StaticDidResolver::new()
-    .with_document(DidDocument::single_key(
-        alice.clone(),
-        alice_key.public_key.clone(),
-    ))
-    .with_document(DidDocument::single_key(
-        gateway_did.clone(),
-        gateway_key.public_key.clone(),
-    ));
+    .with_document(alice_key.document(alice.clone()))
+    .with_document(gateway_key.document(gateway_did.clone()));
 ```
 
 Then it builds a DID-wrapped prompt:
@@ -108,7 +109,14 @@ let infer: Capability<AiCanInfer, _> =
 let read: Capability<CanReadSensitive, _> =
     mint_capability(&policy, verified.subject.as_str(), &verified.resource)?;
 
-let response = ollama.chat_verified_prompt(verified, &infer, &read)?;
+let reply = ollama.chat_verified_prompt_bound(
+    verified,
+    gateway_did,
+    &resolver,
+    &key_store,
+    &infer,
+    &read,
+)?;
 ```
 
 This mirrors the production control flow even though the example uses
@@ -143,6 +151,14 @@ model.
 and decrypts the envelope locally, requires `Capability<AiCanInfer, _>` and
 `Capability<CanReadSensitive, _>`, then sends the plaintext prompt to the local
 Ollama `/api/chat` endpoint.
+
+`DidOllamaClient::chat_verified_prompt_bound` is the audit mode. It performs
+the same capability-guarded reveal and Ollama call, extracts
+`message.content`, and returns a new signed/encrypted DID reply envelope instead
+of loose JSON. The reply envelope gets a fresh DID-shaped id, inherits the
+prompt's action, resource, and privacy label, and carries a `reply_to` reference
+containing the original prompt envelope id and digest. That reference is part of
+the reply signature, so changing the prompt binding invalidates the reply.
 
 `DidOllamaClient::chat_wrapped_prompt` is the compatibility mode for an
 Ollama-compatible server that expects to receive the DID envelope directly, such

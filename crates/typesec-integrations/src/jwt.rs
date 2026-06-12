@@ -2,14 +2,17 @@
 
 use std::collections::HashSet;
 use std::sync::{Arc, RwLock};
+use std::time::{Duration, Instant};
 
 use jsonwebtoken::{
-    Algorithm, DecodingKey, TokenData, Validation, decode, decode_header, jwk::JwkSet,
+    Algorithm, DecodingKey, TokenData, Validation, decode, decode_header,
+    jwk::{Jwk, JwkSet},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tracing::debug;
 use typesec_core::policy::{PolicyEngine, PolicyResult};
+use typesec_core::typestate::{AgentError, Authenticator, Credentials};
 
 use crate::http::{HttpClient, ReqwestHttpClient};
 
@@ -24,6 +27,11 @@ pub struct OidcConfig {
     pub jwks_url: String,
     /// Accepted signing algorithms.
     pub algorithms: Vec<Algorithm>,
+    /// How long fetched JWKS keys are cached before re-fetching.
+    ///
+    /// The cache is also refreshed eagerly when a token references an unknown
+    /// `kid`, so key rotation at the IdP is picked up without a restart.
+    pub jwks_ttl: Duration,
 }
 
 impl OidcConfig {
@@ -38,6 +46,7 @@ impl OidcConfig {
             audience: audience.into(),
             jwks_url: jwks_url.into(),
             algorithms: vec![Algorithm::RS256],
+            jwks_ttl: Duration::from_secs(300),
         }
     }
 }
@@ -126,7 +135,13 @@ impl From<JwtClaims> for VerifiedSubject {
 pub struct JwtAuthenticator {
     config: OidcConfig,
     http: Arc<dyn HttpClient>,
-    jwks: RwLock<Option<JwkSet>>,
+    jwks: RwLock<Option<CachedJwks>>,
+}
+
+#[derive(Clone)]
+struct CachedJwks {
+    keys: JwkSet,
+    fetched_at: Instant,
 }
 
 impl JwtAuthenticator {
@@ -155,11 +170,7 @@ impl JwtAuthenticator {
 
     fn decode_claims(&self, token: &str) -> Result<TokenData<JwtClaims>, JwtAuthError> {
         let header = decode_header(token)?;
-        let jwks = self.jwks()?;
-        let key = match header.kid.as_deref() {
-            Some(kid) => jwks.find(kid).ok_or(JwtAuthError::MissingKey)?,
-            None => jwks.keys.first().ok_or(JwtAuthError::MissingKey)?,
-        };
+        let key = self.resolve_key(header.kid.as_deref())?;
 
         let mut validation = Validation::new(header.alg);
         validation.algorithms = self.config.algorithms.clone();
@@ -168,20 +179,76 @@ impl JwtAuthenticator {
 
         Ok(decode::<JwtClaims>(
             token,
-            &DecodingKey::from_jwk(key)?,
+            &DecodingKey::from_jwk(&key)?,
             &validation,
         )?)
     }
 
-    fn jwks(&self) -> Result<JwkSet, JwtAuthError> {
-        if let Some(jwks) = self.jwks.read().expect("jwks lock poisoned").clone() {
-            return Ok(jwks);
+    /// Resolve the signing key for a token header.
+    ///
+    /// - With a `kid`: look it up in the cached JWKS; on a miss, re-fetch the
+    ///   JWKS once (the IdP may have rotated keys) before failing.
+    /// - Without a `kid`: only unambiguous key sets are accepted — if the JWKS
+    ///   holds more than one key, the token is rejected rather than verified
+    ///   against an arbitrary key.
+    fn resolve_key(&self, kid: Option<&str>) -> Result<Jwk, JwtAuthError> {
+        let jwks = self.jwks(false)?;
+        match kid {
+            Some(kid) => {
+                if let Some(key) = jwks.find(kid) {
+                    return Ok(key.clone());
+                }
+                // Unknown kid — refresh the JWKS once in case of key rotation.
+                let jwks = self.jwks(true)?;
+                jwks.find(kid).cloned().ok_or(JwtAuthError::MissingKey)
+            }
+            None => match jwks.keys.as_slice() {
+                [only] => Ok(only.clone()),
+                [] => Err(JwtAuthError::MissingKey),
+                _ => Err(JwtAuthError::MissingKid),
+            },
+        }
+    }
+
+    fn jwks(&self, force_refresh: bool) -> Result<JwkSet, JwtAuthError> {
+        if !force_refresh
+            && let Some(cached) = self.jwks.read().expect("jwks lock poisoned").as_ref()
+            && cached.fetched_at.elapsed() < self.config.jwks_ttl
+        {
+            return Ok(cached.keys.clone());
         }
 
         let value = self.http.get_json(&self.config.jwks_url, &[])?;
-        let jwks: JwkSet = serde_json::from_value(value)?;
-        *self.jwks.write().expect("jwks lock poisoned") = Some(jwks.clone());
-        Ok(jwks)
+        let keys: JwkSet = serde_json::from_value(value)?;
+        *self.jwks.write().expect("jwks lock poisoned") = Some(CachedJwks {
+            keys: keys.clone(),
+            fetched_at: Instant::now(),
+        });
+        Ok(keys)
+    }
+}
+
+impl Authenticator for JwtAuthenticator {
+    /// Verify the credential token as a JWT and return the *verified* subject.
+    ///
+    /// If the credentials claim a subject, it must match the token's `sub`
+    /// claim — a caller cannot authenticate as someone else's identity by
+    /// pairing a valid token with a different claimed subject.
+    fn verify_credentials(&self, credentials: &Credentials) -> Result<String, AgentError> {
+        let verified = self
+            .verify(&credentials.token)
+            .map_err(|e| AgentError::AuthFailed {
+                reason: format!("jwt verification failed: {e}"),
+            })?;
+        if !credentials.subject.is_empty() && credentials.subject != verified.subject {
+            return Err(AgentError::AuthFailed {
+                reason: format!(
+                    "claimed subject '{}' does not match verified token subject '{}'",
+                    credentials.subject, verified.subject
+                ),
+            });
+        }
+        Ok(verified.subject)
     }
 }
 
@@ -200,6 +267,9 @@ pub enum JwtAuthError {
     /// No matching signing key was found.
     #[error("no matching signing key found in JWKS")]
     MissingKey,
+    /// The token has no `kid` and the JWKS holds multiple keys.
+    #[error("token has no kid but JWKS is ambiguous (multiple keys)")]
+    MissingKid,
     /// Token audience did not match the configured audience.
     #[error("token audience did not match expected audience")]
     InvalidAudience,
@@ -379,5 +449,90 @@ mod tests {
             .expect("token should encode");
 
         assert!(auth.verify(&token).is_err());
+    }
+
+    fn hs256_config_and_jwks(jwks_url: &str) -> (OidcConfig, serde_json::Value) {
+        let mut config = OidcConfig::new("https://issuer.example", "typesec-test", jwks_url);
+        config.algorithms = vec![Algorithm::HS256];
+        let jwks = json!({
+            "keys": [{
+                "kty": "oct",
+                "kid": "test-key",
+                "alg": "HS256",
+                "k": "c2VjcmV0"
+            }]
+        });
+        (config, jwks)
+    }
+
+    fn hs256_token(kid: Option<&str>) -> String {
+        let claims = JwtClaims {
+            sub: "user_123".to_string(),
+            iss: "https://issuer.example".to_string(),
+            aud: Audience::Single("typesec-test".to_string()),
+            exp: (Utc::now() + Duration::minutes(10)).timestamp() as usize,
+            org_id: None,
+            organization_membership_id: None,
+            role: None,
+            permissions: vec![],
+        };
+        let mut header = Header::new(Algorithm::HS256);
+        header.kid = kid.map(str::to_owned);
+        encode(&header, &claims, &EncodingKey::from_secret(b"secret")).expect("token encodes")
+    }
+
+    #[test]
+    fn unknown_kid_triggers_one_jwks_refetch() {
+        use crate::http::RecordingHttpClient;
+        let jwks_url = "https://issuer.example/.well-known/jwks.json";
+        let (config, jwks) = hs256_config_and_jwks(jwks_url);
+        let http = RecordingHttpClient::new().with_response(jwks_url, jwks);
+        let auth = JwtAuthenticator::with_http(config, Arc::new(http.clone()));
+
+        let token = hs256_token(Some("rotated-away-key"));
+        let result = auth.verify(&token);
+
+        assert!(matches!(result, Err(JwtAuthError::MissingKey)));
+        // Initial fetch + one rotation-driven refetch, no more.
+        assert_eq!(http.requests().len(), 2);
+    }
+
+    #[test]
+    fn missing_kid_with_multiple_keys_is_rejected() {
+        let jwks_url = "https://issuer.example/.well-known/jwks.json";
+        let (config, _) = hs256_config_and_jwks(jwks_url);
+        let http = StaticHttpClient::new().with_response(
+            jwks_url,
+            json!({
+                "keys": [
+                    { "kty": "oct", "kid": "a", "alg": "HS256", "k": "c2VjcmV0" },
+                    { "kty": "oct", "kid": "b", "alg": "HS256", "k": "b3RoZXI" }
+                ]
+            }),
+        );
+        let auth = JwtAuthenticator::with_http(config, Arc::new(http));
+
+        let token = hs256_token(None);
+        assert!(matches!(auth.verify(&token), Err(JwtAuthError::MissingKid)));
+    }
+
+    #[test]
+    fn authenticator_rejects_mismatched_claimed_subject() {
+        let jwks_url = "https://issuer.example/.well-known/jwks.json";
+        let (config, jwks) = hs256_config_and_jwks(jwks_url);
+        let http = StaticHttpClient::new().with_response(jwks_url, jwks);
+        let auth = JwtAuthenticator::with_http(config, Arc::new(http));
+        let token = hs256_token(Some("test-key"));
+
+        // Claiming someone else's identity with a valid token must fail.
+        let mismatched = Credentials::new("user_999", token.clone());
+        assert!(auth.verify_credentials(&mismatched).is_err());
+
+        // The verified subject wins; an empty claimed subject is allowed.
+        let unclaimed = Credentials::new("", token);
+        assert_eq!(
+            auth.verify_credentials(&unclaimed).expect("verifies"),
+            "user_123"
+        );
     }
 }

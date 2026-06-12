@@ -8,8 +8,9 @@
 //! 4. Mint `AiCanInfer` and `CanReadSensitive` capabilities.
 //! 5. Send the revealed prompt to an Ollama-shaped HTTP endpoint.
 //!
-//! The example uses `DemoDidKeyStore` and mocked HTTP. It does not use
-//! production cryptography and does not require a live Ollama server.
+//! The example uses `Ed25519DidKeyStore` (Ed25519 signatures, X25519 key
+//! agreement, ChaCha20-Poly1305 encryption) with mocked HTTP. It does not
+//! require a live Ollama server.
 
 use std::sync::Arc;
 
@@ -21,30 +22,26 @@ use typesec_core::{
     resource::GenericResource,
 };
 use typesec_integrations::{
-    DemoDidKeyPair, DemoDidKeyStore, Did, DidDocument, DidEnvelope, DidMessageBody,
-    DidMessageGateway, DidOllamaClient, StaticDidResolver, http::RecordingHttpClient,
+    Did, DidEnvelope, DidMessageBody, DidMessageGateway, DidOllamaClient, Ed25519DidKey,
+    Ed25519DidKeyStore, StaticDidResolver, http::RecordingHttpClient,
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== typesec DID Messaging Demo ===\n");
 
-    let alice = Did::key(b"alice");
-    let gateway_did = Did::key(b"typesec-ollama-gateway");
+    // Deterministic keys keep the demo reproducible; use
+    // `Ed25519DidKey::generate()` for real deployments.
+    let alice_key = Ed25519DidKey::from_seed(b"alice");
+    let gateway_key = Ed25519DidKey::from_seed(b"typesec-ollama-gateway");
 
-    let alice_key = DemoDidKeyPair::from_seed(b"alice");
-    let gateway_key = DemoDidKeyPair::from_seed(b"typesec-ollama-gateway");
+    let alice = Did::key(alice_key.signing_public());
+    let gateway_did = Did::key(gateway_key.signing_public());
 
     let resolver = StaticDidResolver::new()
-        .with_document(DidDocument::single_key(
-            alice.clone(),
-            alice_key.public_key.clone(),
-        ))
-        .with_document(DidDocument::single_key(
-            gateway_did.clone(),
-            gateway_key.public_key.clone(),
-        ));
+        .with_document(alice_key.document(alice.clone()))
+        .with_document(gateway_key.document(gateway_did.clone()));
 
-    let key_store = DemoDidKeyStore::new()
+    let key_store = Ed25519DidKeyStore::new()
         .with_key(alice.clone(), alice_key)
         .with_key(gateway_did.clone(), gateway_key);
 
@@ -63,11 +60,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("resource:   {}", envelope.body.resource);
     println!("ciphertext: {}...", &envelope.ciphertext[..24]);
 
-    let gateway = DidMessageGateway::new(Arc::new(resolver), Arc::new(key_store), gateway_did);
+    let gateway = DidMessageGateway::new(
+        Arc::new(resolver.clone()),
+        Arc::new(key_store.clone()),
+        gateway_did.clone(),
+    );
     let verified = gateway.open_prompt(&envelope)?;
     println!("verified:   {}", verified.subject);
 
-    let policy = PromptPolicy;
+    let policy = PromptPolicy {
+        allowed_subject: alice.to_string(),
+    };
     let infer: Capability<AiCanInfer, GenericResource> =
         mint_capability(&policy, verified.subject.as_str(), &verified.resource)?;
     let read: Capability<CanReadSensitive, GenericResource> =
@@ -90,20 +93,38 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     let ollama =
         DidOllamaClient::with_http("http://localhost:11434", "llama3.2", Arc::new(http.clone()));
-    let response = ollama.chat_verified_prompt(verified, &infer, &read)?;
+    let reply = ollama.chat_verified_prompt_bound(
+        verified,
+        gateway_did,
+        &resolver,
+        &key_store,
+        &infer,
+        &read,
+    )?;
 
-    println!("ollama:     {}", response["message"]["content"]);
+    println!("reply did:  {}", reply.id);
+    println!(
+        "reply to:   {}",
+        reply
+            .body
+            .reply_to
+            .as_ref()
+            .map(|reference| reference.id.as_str())
+            .unwrap_or("<missing>")
+    );
     println!("requests:   {}", http.requests().len());
     println!("\n=== Demo complete ===");
 
     Ok(())
 }
 
-struct PromptPolicy;
+struct PromptPolicy {
+    allowed_subject: String,
+}
 
 impl PolicyEngine for PromptPolicy {
     fn check(&self, subject: &str, action: &str, resource: &str) -> PolicyResult {
-        if subject == "did:key:z616c696365"
+        if subject == self.allowed_subject
             && matches!(action, "ai:infer" | "read_sensitive")
             && resource == "prompt/session/123"
         {

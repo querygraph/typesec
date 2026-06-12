@@ -44,6 +44,38 @@ use proc_macro2::Span;
 use quote::quote;
 use syn::{DeriveInput, LitStr, parse_macro_input};
 
+/// Permission names defined in `typesec-core` (`Permission::name()` values).
+///
+/// Both macros validate against this list so a typo like `raed` fails at
+/// compile time instead of becoming a permission string that never matches.
+const KNOWN_PERMISSIONS: &[&str] = &[
+    "read",
+    "write",
+    "delete",
+    "execute",
+    "delegate",
+    "read_sensitive",
+    "write_sensitive",
+    "declassify",
+    "ai:infer",
+    "ai:train",
+    "ai:exfiltrate",
+];
+
+fn check_permission(name: &str, span: Span) -> Result<(), syn::Error> {
+    if KNOWN_PERMISSIONS.contains(&name) {
+        Ok(())
+    } else {
+        Err(syn::Error::new(
+            span,
+            format!(
+                "unknown permission '{name}' (expected one of: {})",
+                KNOWN_PERMISSIONS.join(", ")
+            ),
+        ))
+    }
+}
+
 /// Derive the `typesec_core::role::Role` trait.
 ///
 /// Requires a `#[role(permissions = "...", resources = "...")]` attribute.
@@ -85,6 +117,9 @@ fn derive_typesec_role_impl(input: DeriveInput) -> Result<proc_macro2::TokenStre
                 .map(|s| s.trim().to_owned())
                 .filter(|s| !s.is_empty())
                 .collect();
+            for permission in &permissions {
+                check_permission(permission, value.span())?;
+            }
             Ok(())
         } else if meta.path.is_ident("resources") {
             let value: LitStr = meta.value()?.parse()?;
@@ -220,6 +255,9 @@ fn policy_impl(input: proc_macro2::TokenStream) -> Result<proc_macro2::TokenStre
 
     for (name, perms, resources) in parsed.0 {
         let name_str = name.to_string().to_lowercase();
+        for perm in &perms {
+            check_permission(&perm.to_string(), perm.span())?;
+        }
         let perm_strs: Vec<String> = perms.iter().map(|p| p.to_string()).collect();
         let perm_lits: Vec<LitStr> = perm_strs
             .iter()

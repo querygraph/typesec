@@ -9,6 +9,12 @@ pub enum TaskError {
     /// A capability was required but could not be obtained.
     #[error("capability error: {0}")]
     Capability(#[from] typesec_core::policy::CapabilityError),
+    /// The supplied capability has expired.
+    #[error("capability expired: {0}")]
+    CapabilityExpired(#[from] typesec_core::CapabilityUseError),
+    /// The supplied capability does not cover this agent or resource instance.
+    #[error("capability mismatch: {0}")]
+    CapabilityMismatch(String),
 }
 
 /// The result type for task execution.

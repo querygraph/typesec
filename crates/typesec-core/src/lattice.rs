@@ -58,34 +58,51 @@ pub trait Implies<Q: Permission>: Permission {}
 
 // ── Implication relationships ─────────────────────────────────────────────────
 
-// CanWrite → CanRead
-impl Implies<CanRead> for CanWrite {}
+/// Single source of truth for the lattice.
+///
+/// Each `Higher => Lower` entry generates *both* the compile-time
+/// `impl Implies<Lower> for Higher` and a runtime table entry used by
+/// [`LatticeEngine`]. Keeping them in one macro invocation means the typed
+/// lattice and the string-based promotion logic cannot drift apart.
+///
+/// Entries must list the transitive closure explicitly (e.g. `CanWriteSensitive`
+/// lists `CanRead` directly, not just `CanWrite`).
+macro_rules! lattice {
+    ($($higher:ty => $lower:ty),* $(,)?) => {
+        $(impl Implies<$lower> for $higher {})*
 
-// CanDelete → CanRead
-impl Implies<CanRead> for CanDelete {}
+        /// `(higher_name, lower_name)` pairs mirroring every `Implies` impl.
+        ///
+        /// Function pointers are used because `Permission::name()` is not `const`.
+        static IMPLICATIONS: &[(fn() -> &'static str, fn() -> &'static str)] = &[
+            $((<$higher as Permission>::name, <$lower as Permission>::name)),*
+        ];
+    };
+}
 
-// CanDelegate → CanRead
-impl Implies<CanRead> for CanDelegate {}
-
-// CanReadSensitive → CanRead
-impl Implies<CanRead> for CanReadSensitive {}
-
-// CanWriteSensitive → CanWrite, CanReadSensitive, CanRead
-impl Implies<CanWrite> for CanWriteSensitive {}
-impl Implies<CanReadSensitive> for CanWriteSensitive {}
-impl Implies<CanRead> for CanWriteSensitive {}
-
-// CanDeclassify → CanReadSensitive, CanRead
-impl Implies<CanReadSensitive> for CanDeclassify {}
-impl Implies<CanRead> for CanDeclassify {}
-
-// AiCanTrain → AiCanInfer, CanRead
-impl Implies<AiCanInfer> for AiCanTrain {}
-impl Implies<CanRead> for AiCanTrain {}
-
-// AiCanExfiltrate → AiCanInfer, CanRead
-impl Implies<AiCanInfer> for AiCanExfiltrate {}
-impl Implies<CanRead> for AiCanExfiltrate {}
+lattice! {
+    // CanWrite → CanRead
+    CanWrite => CanRead,
+    // CanDelete → CanRead
+    CanDelete => CanRead,
+    // CanDelegate → CanRead
+    CanDelegate => CanRead,
+    // CanReadSensitive → CanRead
+    CanReadSensitive => CanRead,
+    // CanWriteSensitive → CanWrite, CanReadSensitive, CanRead
+    CanWriteSensitive => CanWrite,
+    CanWriteSensitive => CanReadSensitive,
+    CanWriteSensitive => CanRead,
+    // CanDeclassify → CanReadSensitive, CanRead
+    CanDeclassify => CanReadSensitive,
+    CanDeclassify => CanRead,
+    // AiCanTrain → AiCanInfer, CanRead
+    AiCanTrain => AiCanInfer,
+    AiCanTrain => CanRead,
+    // AiCanExfiltrate → AiCanInfer, CanRead
+    AiCanExfiltrate => AiCanInfer,
+    AiCanExfiltrate => CanRead,
+}
 
 // ── coerce() on Capability ────────────────────────────────────────────────────
 
@@ -108,10 +125,27 @@ impl<P: Permission, R: Resource> Capability<P, R> {
     where
         P: Implies<Q>,
     {
-        // We are inside `typesec-core`, so we can call `pub(crate) new_unchecked`.
+        self.coerce_ref()
+    }
+
+    /// Like [`coerce`][Self::coerce], but borrows — the original (higher)
+    /// capability is retained.
+    ///
+    /// This is safe for the same reason `coerce` is: `P: Implies<Q>` means the
+    /// holder of `P` already has every right `Q` grants, so deriving a `Q`
+    /// token grants nothing new.
+    pub fn coerce_ref<Q: Permission>(&self) -> Capability<Q, R>
+    where
+        P: Implies<Q>,
+    {
         // The safety guarantee is maintained by the type bound: `P: Implies<Q>`
-        // ensures Q is strictly ≤ P in the lattice.
-        Capability::new_unchecked(self.subject().to_owned(), self.resource_id().to_owned())
+        // ensures Q is strictly ≤ P in the lattice. The issue time is preserved
+        // so a derived capability is never "fresher" than its source.
+        Capability::new_with_issued_at(
+            self.subject().to_owned(),
+            self.resource_id().to_owned(),
+            self.issued_at(),
+        )
     }
 }
 
@@ -149,7 +183,7 @@ impl PolicyEngine for LatticeEngine {
             PolicyResult::Allow => PolicyResult::Allow,
             original => {
                 // Try every permission that implies `action` in the lattice.
-                for &higher in implied_by(action) {
+                for higher in implied_by(action) {
                     debug!(
                         subject,
                         action, higher, resource, "testing lattice promotion"
@@ -175,24 +209,13 @@ impl PolicyEngine for LatticeEngine {
 /// Returns the permission names that imply `permission` in the lattice.
 ///
 /// These are the "upward covers" — permissions strictly higher in the partial
-/// order that directly or transitively imply the given one.
-fn implied_by(permission: &str) -> &'static [&'static str] {
-    match permission {
-        "read" => &[
-            "write",
-            "delete",
-            "delegate",
-            "read_sensitive",
-            "write_sensitive",
-            "declassify",
-            "ai:train",
-            "ai:exfiltrate",
-        ],
-        "write" => &["write_sensitive"],
-        "read_sensitive" => &["write_sensitive", "declassify"],
-        "ai:infer" => &["ai:train", "ai:exfiltrate"],
-        _ => &[],
-    }
+/// order that directly or transitively imply the given one. Derived from the
+/// same `lattice!` table as the typed `Implies` impls, so the two cannot drift.
+fn implied_by(permission: &str) -> impl Iterator<Item = &'static str> + '_ {
+    IMPLICATIONS
+        .iter()
+        .filter(move |(_, lower)| lower() == permission)
+        .map(|(higher, _)| higher())
 }
 
 // ── Unit tests ─────────────────────────────────────────────────────────────────

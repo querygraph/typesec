@@ -5,9 +5,12 @@
 //! a verified DID message identifies the subject, and a policy engine decides
 //! whether to mint the typed capability required to reveal or use the payload.
 //!
-//! The included [`DemoDidKeyStore`] is deterministic and intended for local
-//! examples and tests. Production integrations should implement [`DidKeyStore`]
-//! with JOSE/DIDComm, HPKE, or an HSM/KMS.
+//! [`Ed25519DidKeyStore`] is the production key store: Ed25519 signatures,
+//! X25519 key agreement, and ChaCha20-Poly1305 payload encryption. The
+//! deterministic, **non-cryptographic** `DemoDidKeyStore` is only compiled in
+//! tests or behind the `demo-crypto` feature — never enable that feature in
+//! production builds. Deployments with stronger requirements should implement
+//! [`DidKeyStore`] with JOSE/DIDComm, HPKE, or an HSM/KMS.
 
 use std::{
     collections::HashMap,
@@ -157,6 +160,37 @@ impl DidDocument {
         }
     }
 
+    /// Create a document with separate Ed25519 (authentication) and X25519
+    /// (key-agreement) keys, as produced by [`Ed25519DidKey`].
+    pub fn with_signing_and_agreement_keys(
+        did: Did,
+        signing_public: impl AsRef<[u8]>,
+        agreement_public: impl AsRef<[u8]>,
+    ) -> Self {
+        let signing_id = format!("{did}#key-1");
+        let agreement_id = format!("{did}#key-2");
+        Self {
+            id: did.clone(),
+            verification_method: vec![
+                VerificationMethod {
+                    id: signing_id.clone(),
+                    method_type: "Ed25519VerificationKey2020".to_owned(),
+                    controller: did.clone(),
+                    public_key_hex: hex_encode(signing_public.as_ref()),
+                },
+                VerificationMethod {
+                    id: agreement_id.clone(),
+                    method_type: "X25519KeyAgreementKey2020".to_owned(),
+                    controller: did,
+                    public_key_hex: hex_encode(agreement_public.as_ref()),
+                },
+            ],
+            authentication: vec![signing_id],
+            key_agreement: vec![agreement_id],
+            service: Vec::new(),
+        }
+    }
+
     fn method(&self, id: &str) -> Option<&VerificationMethod> {
         self.verification_method
             .iter()
@@ -248,6 +282,10 @@ pub trait DidKeyStore: Send + Sync {
 }
 
 /// Public/private key material for a local DID subject.
+///
+/// **Not cryptography.** Key derivation is a non-cryptographic hash and the
+/// "public" key equals the private key. Tests and demos only.
+#[cfg(any(test, feature = "demo-crypto"))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DemoDidKeyPair {
     /// Public key bytes advertised in a DID document.
@@ -255,6 +293,7 @@ pub struct DemoDidKeyPair {
     private_key: Vec<u8>,
 }
 
+#[cfg(any(test, feature = "demo-crypto"))]
 impl DemoDidKeyPair {
     /// Create deterministic key material from a seed.
     pub fn from_seed(seed: impl AsRef<[u8]>) -> Self {
@@ -268,11 +307,17 @@ impl DemoDidKeyPair {
 }
 
 /// Local deterministic key store for DID envelope examples and tests.
+///
+/// **Not cryptography**: signatures are forgeable by anyone holding the public
+/// key, and "encryption" is a repeating-key XOR. Only available in tests or
+/// behind the `demo-crypto` feature; use [`Ed25519DidKeyStore`] in real code.
+#[cfg(any(test, feature = "demo-crypto"))]
 #[derive(Debug, Default, Clone)]
 pub struct DemoDidKeyStore {
     keys: HashMap<Did, DemoDidKeyPair>,
 }
 
+#[cfg(any(test, feature = "demo-crypto"))]
 impl DemoDidKeyStore {
     /// Create an empty key store.
     pub fn new() -> Self {
@@ -292,6 +337,7 @@ impl DemoDidKeyStore {
     }
 }
 
+#[cfg(any(test, feature = "demo-crypto"))]
 impl DidKeyStore for DemoDidKeyStore {
     fn sign(&self, signer: &Did, message: &[u8]) -> Result<String, DidError> {
         let key = self.key(signer)?;
@@ -344,6 +390,186 @@ impl DidKeyStore for DemoDidKeyStore {
     }
 }
 
+// ── Production key store ──────────────────────────────────────────────────────
+
+/// Real key material for a local DID subject.
+///
+/// Holds an Ed25519 signing key (advertised as the DID document's
+/// authentication key) and an independent X25519 static secret (advertised as
+/// the key-agreement key).
+#[derive(Clone)]
+pub struct Ed25519DidKey {
+    signing: ed25519_dalek::SigningKey,
+    agreement: x25519_dalek::StaticSecret,
+}
+
+impl Ed25519DidKey {
+    /// Generate a key pair from the operating system RNG.
+    pub fn generate() -> Result<Self, DidError> {
+        let mut signing_seed = [0u8; 32];
+        let mut agreement_seed = [0u8; 32];
+        getrandom::getrandom(&mut signing_seed).map_err(|e| DidError::KeyGen(e.to_string()))?;
+        getrandom::getrandom(&mut agreement_seed).map_err(|e| DidError::KeyGen(e.to_string()))?;
+        Ok(Self::from_seeds(signing_seed, agreement_seed))
+    }
+
+    /// Derive a key pair deterministically from a seed via SHA-256 expansion.
+    ///
+    /// Only as strong as the seed's entropy — use [`generate`][Self::generate]
+    /// unless you need reproducible keys (tests, fixtures).
+    pub fn from_seed(seed: impl AsRef<[u8]>) -> Self {
+        let signing_seed = sha256_tagged(b"typesec-ed25519-signing", seed.as_ref());
+        let agreement_seed = sha256_tagged(b"typesec-x25519-agreement", seed.as_ref());
+        Self::from_seeds(signing_seed, agreement_seed)
+    }
+
+    fn from_seeds(signing_seed: [u8; 32], agreement_seed: [u8; 32]) -> Self {
+        Self {
+            signing: ed25519_dalek::SigningKey::from_bytes(&signing_seed),
+            agreement: x25519_dalek::StaticSecret::from(agreement_seed),
+        }
+    }
+
+    /// Ed25519 public key bytes (the DID document authentication key).
+    pub fn signing_public(&self) -> [u8; 32] {
+        self.signing.verifying_key().to_bytes()
+    }
+
+    /// X25519 public key bytes (the DID document key-agreement key).
+    pub fn agreement_public(&self) -> [u8; 32] {
+        x25519_dalek::PublicKey::from(&self.agreement).to_bytes()
+    }
+
+    /// Build a DID document advertising this key pair's public halves.
+    pub fn document(&self, did: Did) -> DidDocument {
+        DidDocument::with_signing_and_agreement_keys(
+            did,
+            self.signing_public(),
+            self.agreement_public(),
+        )
+    }
+}
+
+impl std::fmt::Debug for Ed25519DidKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Ed25519DidKey")
+            .field("signing_public", &hex_encode(&self.signing_public()))
+            .field("agreement_public", &hex_encode(&self.agreement_public()))
+            .finish_non_exhaustive()
+    }
+}
+
+/// Production [`DidKeyStore`]: Ed25519 signatures, X25519 ECDH, and
+/// ChaCha20-Poly1305 authenticated payload encryption.
+#[derive(Debug, Default, Clone)]
+pub struct Ed25519DidKeyStore {
+    keys: HashMap<Did, Ed25519DidKey>,
+}
+
+impl Ed25519DidKeyStore {
+    /// Create an empty key store.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add a key pair for a DID.
+    pub fn with_key(mut self, did: Did, key: Ed25519DidKey) -> Self {
+        self.keys.insert(did, key);
+        self
+    }
+
+    fn key(&self, did: &Did) -> Result<&Ed25519DidKey, DidError> {
+        self.keys
+            .get(did)
+            .ok_or_else(|| DidError::MissingPrivateKey(did.to_string()))
+    }
+
+    fn aead_key(shared_secret: &[u8; 32]) -> chacha20poly1305::Key {
+        let digest = sha256_tagged(b"typesec-did-aead", shared_secret);
+        chacha20poly1305::Key::from(digest)
+    }
+}
+
+impl DidKeyStore for Ed25519DidKeyStore {
+    fn sign(&self, signer: &Did, message: &[u8]) -> Result<String, DidError> {
+        use ed25519_dalek::Signer;
+        let key = self.key(signer)?;
+        Ok(hex_encode(&key.signing.sign(message).to_bytes()))
+    }
+
+    fn verify(
+        &self,
+        method: &VerificationMethod,
+        message: &[u8],
+        signature: &str,
+    ) -> Result<(), DidError> {
+        use ed25519_dalek::Verifier;
+        let public: [u8; 32] = method
+            .public_key()?
+            .try_into()
+            .map_err(|_| DidError::InvalidKey("ed25519 public key must be 32 bytes".into()))?;
+        let verifying = ed25519_dalek::VerifyingKey::from_bytes(&public)
+            .map_err(|e| DidError::InvalidKey(e.to_string()))?;
+        let signature_bytes: [u8; 64] = hex_decode(signature)?
+            .try_into()
+            .map_err(|_| DidError::InvalidSignature)?;
+        verifying
+            .verify(
+                message,
+                &ed25519_dalek::Signature::from_bytes(&signature_bytes),
+            )
+            .map_err(|_| DidError::InvalidSignature)
+    }
+
+    fn encrypt_for(
+        &self,
+        sender: &Did,
+        recipient_public_key: &[u8],
+        plaintext: &[u8],
+        nonce: &[u8],
+    ) -> Result<String, DidError> {
+        use chacha20poly1305::KeyInit;
+        use chacha20poly1305::aead::Aead;
+        let sender_key = self.key(sender)?;
+        let recipient: [u8; 32] = recipient_public_key
+            .try_into()
+            .map_err(|_| DidError::InvalidKey("x25519 public key must be 32 bytes".into()))?;
+        let shared = sender_key
+            .agreement
+            .diffie_hellman(&x25519_dalek::PublicKey::from(recipient));
+        let nonce: [u8; 12] = nonce.try_into().map_err(|_| DidError::InvalidNonce)?;
+        let cipher = chacha20poly1305::ChaCha20Poly1305::new(&Self::aead_key(shared.as_bytes()));
+        let ciphertext = cipher
+            .encrypt(&chacha20poly1305::Nonce::from(nonce), plaintext)
+            .map_err(|_| DidError::EncryptionFailed)?;
+        Ok(hex_encode(&ciphertext))
+    }
+
+    fn decrypt_for(
+        &self,
+        recipient: &Did,
+        sender_public_key: &[u8],
+        nonce: &[u8],
+        ciphertext_hex: &str,
+    ) -> Result<Vec<u8>, DidError> {
+        use chacha20poly1305::KeyInit;
+        use chacha20poly1305::aead::Aead;
+        let recipient_key = self.key(recipient)?;
+        let sender: [u8; 32] = sender_public_key
+            .try_into()
+            .map_err(|_| DidError::InvalidKey("x25519 public key must be 32 bytes".into()))?;
+        let shared = recipient_key
+            .agreement
+            .diffie_hellman(&x25519_dalek::PublicKey::from(sender));
+        let nonce: [u8; 12] = nonce.try_into().map_err(|_| DidError::InvalidNonce)?;
+        let ciphertext = hex_decode(ciphertext_hex)?;
+        let cipher = chacha20poly1305::ChaCha20Poly1305::new(&Self::aead_key(shared.as_bytes()));
+        cipher
+            .decrypt(&chacha20poly1305::Nonce::from(nonce), ciphertext.as_slice())
+            .map_err(|_| DidError::DecryptionFailed)
+    }
+}
+
 /// Message metadata that policy engines evaluate before payload use.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DidMessageBody {
@@ -353,6 +579,9 @@ pub struct DidMessageBody {
     pub resource: String,
     /// Payload privacy label, such as `secret`.
     pub privacy: String,
+    /// Prompt envelope this message is bound to, for reply envelopes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reply_to: Option<DidMessageReference>,
 }
 
 impl DidMessageBody {
@@ -362,8 +591,47 @@ impl DidMessageBody {
             action: "ai:infer".to_owned(),
             resource: resource.into(),
             privacy: "secret".to_owned(),
+            reply_to: None,
         }
     }
+
+    /// Create a reply body that inherits the prompt's policy-visible metadata.
+    pub fn reply_to_prompt(prompt: &VerifiedDidPrompt) -> Self {
+        Self {
+            action: prompt.body.action.clone(),
+            resource: prompt.body.resource.clone(),
+            privacy: prompt.body.privacy.clone(),
+            reply_to: Some(prompt.prompt_ref.clone()),
+        }
+    }
+}
+
+/// The prompt context a reply envelope is bound to.
+#[derive(Debug, Clone)]
+pub struct DidReplyBinding {
+    /// Policy-visible metadata of the prompt being answered.
+    pub prompt_body: DidMessageBody,
+    /// Stable reference to the signed prompt envelope.
+    pub prompt_ref: DidMessageReference,
+}
+
+impl DidReplyBinding {
+    /// Bind a reply to a verified prompt.
+    pub fn for_prompt(prompt: &VerifiedDidPrompt) -> Self {
+        Self {
+            prompt_body: prompt.body.clone(),
+            prompt_ref: prompt.prompt_ref.clone(),
+        }
+    }
+}
+
+/// Stable reference to a DID message envelope.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DidMessageReference {
+    /// Referenced DID message id.
+    pub id: String,
+    /// SHA-256 digest of the referenced signed envelope.
+    pub digest: String,
 }
 
 /// Encrypted DID message envelope.
@@ -415,7 +683,7 @@ impl DidEnvelope {
             .first()
             .cloned()
             .ok_or(DidError::MissingAuthentication)?;
-        let nonce = derive_bytes(from.as_str().as_bytes(), id.as_bytes(), 12);
+        let nonce = random_nonce()?;
         let ciphertext = key_store.encrypt_for(
             &from,
             &recipient_key.public_key()?,
@@ -439,9 +707,80 @@ impl DidEnvelope {
         Ok(envelope)
     }
 
+    /// Create an encrypted reply envelope bound to a verified prompt envelope.
+    pub fn reply(
+        reply_did: Did,
+        from: Did,
+        to: Did,
+        binding: DidReplyBinding,
+        plaintext: impl AsRef<[u8]>,
+        resolver: &dyn DidResolver,
+        key_store: &dyn DidKeyStore,
+    ) -> Result<Self, DidError> {
+        let DidReplyBinding {
+            prompt_body,
+            prompt_ref,
+        } = binding;
+        let now = unix_time();
+        let recipient_document = resolver.resolve(&to)?;
+        let recipient_key = recipient_document.key_agreement_key()?;
+        let sender_document = resolver.resolve(&from)?;
+        let kid = sender_document
+            .authentication
+            .first()
+            .cloned()
+            .ok_or(DidError::MissingAuthentication)?;
+        let id = reply_did.to_string();
+        let nonce = random_nonce()?;
+        let ciphertext = key_store.encrypt_for(
+            &from,
+            &recipient_key.public_key()?,
+            plaintext.as_ref(),
+            &nonce,
+        )?;
+        let mut envelope = Self {
+            id,
+            message_type: "https://typesec.dev/did/message/v1/reply".to_owned(),
+            from,
+            to: vec![to],
+            created_time: now,
+            expires_time: now + 300,
+            body: DidMessageBody {
+                action: prompt_body.action.clone(),
+                resource: prompt_body.resource.clone(),
+                privacy: prompt_body.privacy.clone(),
+                reply_to: Some(prompt_ref),
+            },
+            kid,
+            nonce: hex_encode(&nonce),
+            ciphertext,
+            signature: String::new(),
+        };
+        envelope.signature = key_store.sign(&envelope.from, envelope.signing_input().as_bytes())?;
+        Ok(envelope)
+    }
+
+    /// Stable reference to this signed envelope for reply binding.
+    pub fn reference(&self) -> DidMessageReference {
+        let seed = format!("{}\n{}", self.signing_input(), self.signature);
+        DidMessageReference {
+            id: self.id.clone(),
+            digest: hex_encode(&sha256_tagged(
+                b"typesec-did-envelope-reference",
+                seed.as_bytes(),
+            )),
+        }
+    }
+
     fn signing_input(&self) -> String {
+        let reply_to = self
+            .body
+            .reply_to
+            .as_ref()
+            .map(|reference| format!("{}\n{}", reference.id, reference.digest))
+            .unwrap_or_default();
         format!(
-            "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
+            "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
             self.id,
             self.message_type,
             self.from,
@@ -452,7 +791,10 @@ impl DidEnvelope {
                 .join(","),
             self.created_time,
             self.expires_time,
+            self.body.action,
             self.body.resource,
+            self.body.privacy,
+            reply_to,
             self.ciphertext
         )
     }
@@ -463,6 +805,8 @@ impl DidEnvelope {
 pub struct VerifiedDidPrompt {
     /// Verified DID subject.
     pub subject: Did,
+    /// Stable reference to the verified prompt envelope.
+    pub prompt_ref: DidMessageReference,
     /// Policy-visible metadata.
     pub body: DidMessageBody,
     /// Resource associated with the payload.
@@ -510,10 +854,13 @@ impl DidMessageGateway {
             &envelope.signature,
         )?;
 
+        // Decryption uses the sender's *key-agreement* key, which may be a
+        // different key (X25519) than the authentication key (Ed25519).
+        let sender_agreement_key = sender_document.key_agreement_key()?;
         let nonce = hex_decode(&envelope.nonce)?;
         let plaintext = self.key_store.decrypt_for(
             &self.recipient,
-            &sender_key.public_key()?,
+            &sender_agreement_key.public_key()?,
             &nonce,
             &envelope.ciphertext,
         )?;
@@ -522,6 +869,7 @@ impl DidMessageGateway {
 
         Ok(VerifiedDidPrompt {
             subject: envelope.from.clone(),
+            prompt_ref: envelope.reference(),
             body: envelope.body.clone(),
             prompt: SecureValue::protect(prompt, &resource),
             resource,
@@ -562,7 +910,7 @@ impl DidOllamaClient {
         _infer: &Capability<AiCanInfer, GenericResource>,
         read: &Capability<CanReadSensitive, GenericResource>,
     ) -> Result<Value, DidError> {
-        let plaintext = prompt.prompt.reveal(read);
+        let plaintext = prompt.prompt.reveal(read)?;
         let body = json!({
             "model": self.model,
             "stream": false,
@@ -574,6 +922,41 @@ impl DidOllamaClient {
         self.http
             .post_json(&format!("{}/api/chat", self.base_url), &[], &body)
             .map_err(DidError::Http)
+    }
+
+    /// Send a verified prompt to Ollama and bind the assistant reply to it.
+    pub fn chat_verified_prompt_bound(
+        &self,
+        prompt: VerifiedDidPrompt,
+        reply_from: Did,
+        resolver: &dyn DidResolver,
+        key_store: &dyn DidKeyStore,
+        _infer: &Capability<AiCanInfer, GenericResource>,
+        read: &Capability<CanReadSensitive, GenericResource>,
+    ) -> Result<DidEnvelope, DidError> {
+        let reply_to = prompt.subject.clone();
+        let binding = DidReplyBinding::for_prompt(&prompt);
+        let plaintext = prompt.prompt.reveal(read)?;
+        let body = json!({
+            "model": self.model,
+            "stream": false,
+            "messages": [{
+                "role": "user",
+                "content": plaintext
+            }]
+        });
+        let response = self
+            .http
+            .post_json(&format!("{}/api/chat", self.base_url), &[], &body)
+            .map_err(DidError::Http)?;
+        let reply = ollama_reply_content(&response)?;
+        let reply_did = Did::key(sha256_tagged(
+            b"typesec-did-ollama-reply",
+            format!("{}\n{}", binding.prompt_ref.digest, reply).as_bytes(),
+        ));
+        DidEnvelope::reply(
+            reply_did, reply_from, reply_to, binding, reply, resolver, key_store,
+        )
     }
 
     /// Forward an already wrapped DID prompt to a DID-aware Ollama fork.
@@ -619,6 +1002,24 @@ pub enum DidError {
     /// Envelope has expired.
     #[error("DID envelope has expired")]
     Expired,
+    /// Key material has the wrong size or encoding.
+    #[error("invalid key material: {0}")]
+    InvalidKey(String),
+    /// AEAD nonce must be exactly 12 bytes.
+    #[error("invalid nonce: expected 12 bytes")]
+    InvalidNonce,
+    /// Payload encryption failed.
+    #[error("DID payload encryption failed")]
+    EncryptionFailed,
+    /// Payload decryption or authentication failed.
+    #[error("DID payload decryption failed")]
+    DecryptionFailed,
+    /// Operating system RNG was unavailable.
+    #[error("key generation failed: {0}")]
+    KeyGen(String),
+    /// A typed capability did not cover the protected payload's resource.
+    #[error("capability does not cover this payload: {0}")]
+    Capability(#[from] typesec_core::secure_value::SecureAccessError),
     /// Hex input is malformed.
     #[error("invalid hex encoding")]
     InvalidHex,
@@ -628,6 +1029,17 @@ pub enum DidError {
     /// HTTP request failed.
     #[error("DID HTTP integration failed: {0}")]
     Http(Box<dyn std::error::Error + Send + Sync>),
+    /// Ollama response did not contain an assistant message.
+    #[error("Ollama response did not contain message.content")]
+    MissingOllamaReply,
+}
+
+fn ollama_reply_content(response: &Value) -> Result<&str, DidError> {
+    response
+        .get("message")
+        .and_then(|message| message.get("content"))
+        .and_then(Value::as_str)
+        .ok_or(DidError::MissingOllamaReply)
 }
 
 fn unix_time() -> u64 {
@@ -637,6 +1049,24 @@ fn unix_time() -> u64 {
         .unwrap_or_default()
 }
 
+/// Domain-separated SHA-256: `SHA-256(domain || 0x00 || data)`.
+fn sha256_tagged(domain: &[u8], data: &[u8]) -> [u8; 32] {
+    use sha2::Digest;
+    let mut hasher = sha2::Sha256::new();
+    hasher.update(domain);
+    hasher.update([0u8]);
+    hasher.update(data);
+    hasher.finalize().into()
+}
+
+/// A fresh random 12-byte AEAD nonce from the OS RNG.
+fn random_nonce() -> Result<[u8; 12], DidError> {
+    let mut nonce = [0u8; 12];
+    getrandom::getrandom(&mut nonce).map_err(|e| DidError::KeyGen(e.to_string()))?;
+    Ok(nonce)
+}
+
+#[cfg(any(test, feature = "demo-crypto"))]
 fn derive_shared_key(private_key: &[u8], public_key: &[u8], nonce: &[u8]) -> Vec<u8> {
     let mut seed = Vec::with_capacity(private_key.len() + public_key.len() + nonce.len());
     if private_key <= public_key {
@@ -650,6 +1080,8 @@ fn derive_shared_key(private_key: &[u8], public_key: &[u8], nonce: &[u8]) -> Vec
     derive_bytes(b"typesec-did-shared", &seed, 32)
 }
 
+/// Non-cryptographic FNV/xorshift expansion — demo key store only.
+#[cfg(any(test, feature = "demo-crypto"))]
 fn derive_bytes(domain: &[u8], seed: &[u8], len: usize) -> Vec<u8> {
     let mut out = Vec::with_capacity(len);
     let mut state: u64 = 0xcbf29ce484222325;
@@ -668,6 +1100,7 @@ fn derive_bytes(domain: &[u8], seed: &[u8], len: usize) -> Vec<u8> {
     out
 }
 
+#[cfg(any(test, feature = "demo-crypto"))]
 fn xor_stream(input: &[u8], key: &[u8]) -> Vec<u8> {
     input
         .iter()
@@ -676,6 +1109,7 @@ fn xor_stream(input: &[u8], key: &[u8]) -> Vec<u8> {
         .collect()
 }
 
+#[cfg(any(test, feature = "demo-crypto"))]
 fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
     if left.len() != right.len() {
         return false;
@@ -815,7 +1249,7 @@ mod tests {
         .expect("read cap");
         assert_eq!(infer.resource_id(), "prompt/session/123");
         assert_eq!(
-            verified.prompt.reveal(&read),
+            verified.prompt.reveal(&read).expect("matching resource"),
             "summarize this confidential record"
         );
     }
@@ -869,6 +1303,220 @@ mod tests {
             requests[0].body.as_ref().unwrap()["messages"][0]["content"],
             "private prompt"
         );
+    }
+
+    #[test]
+    fn bound_ollama_reply_creates_signed_reply_envelope_for_prompt() {
+        let (alice, agent, resolver, keys) = fixture();
+        let prompt_envelope = DidEnvelope::prompt(
+            "msg-1",
+            alice.clone(),
+            agent.clone(),
+            DidMessageBody::infer_prompt("prompt/session/123"),
+            "private prompt",
+            &resolver,
+            &keys,
+        )
+        .expect("prompt envelope");
+        let prompt_ref = prompt_envelope.reference();
+        let gateway = DidMessageGateway::new(
+            Arc::new(resolver.clone()),
+            Arc::new(keys.clone()),
+            agent.clone(),
+        );
+        let verified = gateway
+            .open_prompt(&prompt_envelope)
+            .expect("verified prompt");
+        let infer = mint_capability::<AiCanInfer, _>(
+            &PromptPolicy,
+            verified.subject.as_str(),
+            &verified.resource,
+        )
+        .expect("infer cap");
+        let read = mint_capability::<CanReadSensitive, _>(
+            &PromptPolicy,
+            verified.subject.as_str(),
+            &verified.resource,
+        )
+        .expect("read cap");
+
+        let http = RecordingHttpClient::new().with_response(
+            "http://localhost:11434/api/chat",
+            json!({ "message": { "content": "bound reply" } }),
+        );
+        let client = DidOllamaClient::with_http(
+            "http://localhost:11434",
+            "llama3.2",
+            Arc::new(http.clone()),
+        );
+        let reply_envelope = client
+            .chat_verified_prompt_bound(verified, agent.clone(), &resolver, &keys, &infer, &read)
+            .expect("bound reply");
+
+        assert!(reply_envelope.id.starts_with("did:key:z"));
+        assert_eq!(
+            reply_envelope.message_type,
+            "https://typesec.dev/did/message/v1/reply"
+        );
+        assert_eq!(reply_envelope.from, agent);
+        assert_eq!(reply_envelope.to, vec![alice.clone()]);
+        assert_eq!(reply_envelope.body.resource, "prompt/session/123");
+        assert_eq!(reply_envelope.body.privacy, "secret");
+        assert_eq!(reply_envelope.body.reply_to, Some(prompt_ref));
+        assert_ne!(reply_envelope.ciphertext, "bound reply");
+
+        let reply_gateway = DidMessageGateway::new(Arc::new(resolver), Arc::new(keys), alice);
+        let opened_reply = reply_gateway
+            .open_prompt(&reply_envelope)
+            .expect("verified reply");
+        assert_eq!(opened_reply.subject, reply_envelope.from);
+        assert_eq!(
+            opened_reply
+                .prompt
+                .reveal(&read)
+                .expect("matching resource"),
+            "bound reply"
+        );
+    }
+
+    #[test]
+    fn reply_signature_covers_prompt_reference() {
+        let (alice, agent, resolver, keys) = fixture();
+        let prompt_envelope = DidEnvelope::prompt(
+            "msg-1",
+            alice.clone(),
+            agent.clone(),
+            DidMessageBody::infer_prompt("prompt/session/123"),
+            "private prompt",
+            &resolver,
+            &keys,
+        )
+        .expect("prompt envelope");
+        let gateway = DidMessageGateway::new(
+            Arc::new(resolver.clone()),
+            Arc::new(keys.clone()),
+            agent.clone(),
+        );
+        let verified = gateway
+            .open_prompt(&prompt_envelope)
+            .expect("verified prompt");
+        let mut reply_envelope = DidEnvelope::reply(
+            Did::key(b"reply-1"),
+            agent,
+            alice.clone(),
+            DidReplyBinding::for_prompt(&verified),
+            "bound reply",
+            &resolver,
+            &keys,
+        )
+        .expect("reply envelope");
+        reply_envelope
+            .body
+            .reply_to
+            .as_mut()
+            .expect("prompt reference")
+            .digest = "tampered".to_owned();
+
+        let reply_gateway = DidMessageGateway::new(Arc::new(resolver), Arc::new(keys), alice);
+        assert!(matches!(
+            reply_gateway.open_prompt(&reply_envelope),
+            Err(DidError::InvalidSignature)
+        ));
+    }
+
+    fn ed25519_fixture() -> (Did, Did, StaticDidResolver, Ed25519DidKeyStore) {
+        let alice_key = Ed25519DidKey::from_seed(b"alice-ed25519");
+        let agent_key = Ed25519DidKey::from_seed(b"agent-ed25519");
+        let alice = Did::key(alice_key.signing_public());
+        let agent = Did::key(agent_key.signing_public());
+        let resolver = StaticDidResolver::new()
+            .with_document(alice_key.document(alice.clone()))
+            .with_document(agent_key.document(agent.clone()));
+        let keys = Ed25519DidKeyStore::new()
+            .with_key(alice.clone(), alice_key)
+            .with_key(agent.clone(), agent_key);
+        (alice, agent, resolver, keys)
+    }
+
+    #[test]
+    fn ed25519_envelope_roundtrip() {
+        let (alice, agent, resolver, keys) = ed25519_fixture();
+        let envelope = DidEnvelope::prompt(
+            "msg-ed-1",
+            alice.clone(),
+            agent.clone(),
+            DidMessageBody::infer_prompt("prompt/session/ed"),
+            "confidential prompt over real crypto",
+            &resolver,
+            &keys,
+        )
+        .expect("envelope");
+        assert_ne!(envelope.ciphertext, "confidential prompt over real crypto");
+
+        let gateway = DidMessageGateway::new(Arc::new(resolver), Arc::new(keys), agent);
+        let verified = gateway.open_prompt(&envelope).expect("verified prompt");
+        assert_eq!(verified.subject, alice);
+
+        let cap: typesec_core::Capability<CanReadSensitive, GenericResource> = mint_capability(
+            &AllowAllForTest,
+            verified.subject.as_str(),
+            &verified.resource,
+        )
+        .expect("read cap");
+        assert_eq!(
+            verified.prompt.reveal(&cap).expect("matching resource"),
+            "confidential prompt over real crypto"
+        );
+    }
+
+    #[test]
+    fn ed25519_rejects_tampered_envelope() {
+        let (alice, agent, resolver, keys) = ed25519_fixture();
+        let mut envelope = DidEnvelope::prompt(
+            "msg-ed-2",
+            alice,
+            agent.clone(),
+            DidMessageBody::infer_prompt("prompt/session/ed"),
+            "payload",
+            &resolver,
+            &keys,
+        )
+        .expect("envelope");
+        envelope.body.resource = "prompt/session/other".to_owned();
+
+        let gateway = DidMessageGateway::new(Arc::new(resolver), Arc::new(keys), agent);
+        assert!(matches!(
+            gateway.open_prompt(&envelope),
+            Err(DidError::InvalidSignature)
+        ));
+    }
+
+    #[test]
+    fn ed25519_signature_is_not_forgeable_from_public_key() {
+        // With the demo store, anyone holding the public key could mint a
+        // valid signature. The Ed25519 store must not allow that.
+        let (alice, _agent, resolver, _keys) = ed25519_fixture();
+        let document = resolver.resolve(&alice).expect("document");
+        let auth_method = &document.verification_method[0];
+
+        // An attacker key store that does NOT hold alice's private key but
+        // knows her public key cannot produce a signature that verifies.
+        let attacker_key = Ed25519DidKey::from_seed(b"attacker");
+        let attacker_store = Ed25519DidKeyStore::new().with_key(alice.clone(), attacker_key);
+        let forged = attacker_store.sign(&alice, b"message").expect("sign");
+
+        let honest_store = Ed25519DidKeyStore::new();
+        assert!(matches!(
+            honest_store.verify(auth_method, b"message", &forged),
+            Err(DidError::InvalidSignature)
+        ));
+    }
+
+    struct AllowAllForTest;
+    impl PolicyEngine for AllowAllForTest {
+        fn check(&self, _: &str, _: &str, _: &str) -> PolicyResult {
+            PolicyResult::Allow
+        }
     }
 
     #[test]

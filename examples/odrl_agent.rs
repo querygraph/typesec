@@ -83,7 +83,7 @@ async fn main() {
         let engine_arc: Arc<dyn typesec_core::policy::PolicyEngine> = Arc::new(engine);
 
         let agent = SecureAgent::new(engine_arc)
-            .authenticate(Credentials::new("agent:summarizer", "tok"))
+            .authenticate_unverified(Credentials::new("agent:summarizer", "tok"))
             .expect("auth");
 
         match agent.request_capability::<CanRead, _>(&customer_data).await {
@@ -115,7 +115,7 @@ async fn main() {
         let engine_arc: Arc<dyn typesec_core::policy::PolicyEngine> = Arc::new(engine);
 
         let agent = SecureAgent::new(engine_arc)
-            .authenticate(Credentials::new("agent:summarizer", "tok"))
+            .authenticate_unverified(Credentials::new("agent:summarizer", "tok"))
             .expect("auth");
 
         match agent.request_capability::<CanRead, _>(&customer_data).await {
@@ -135,7 +135,7 @@ async fn main() {
         let engine_arc: Arc<dyn typesec_core::policy::PolicyEngine> = Arc::new(engine);
 
         let agent = SecureAgent::new(engine_arc)
-            .authenticate(Credentials::new("agent:summarizer", "tok"))
+            .authenticate_unverified(Credentials::new("agent:summarizer", "tok"))
             .expect("auth");
 
         match agent
@@ -159,7 +159,7 @@ async fn main() {
         let engine_arc: Arc<dyn typesec_core::policy::PolicyEngine> = Arc::new(engine);
 
         let agent = SecureAgent::new(engine_arc)
-            .authenticate(Credentials::new("agent:summarizer", "tok"))
+            .authenticate_unverified(Credentials::new("agent:summarizer", "tok"))
             .expect("auth");
 
         match agent
@@ -198,7 +198,7 @@ assignments:
             .expect("build");
 
         let agent = composed
-            .authenticate(Credentials::new("agent:summarizer", "tok"))
+            .authenticate_unverified(Credentials::new("agent:summarizer", "tok"))
             .expect("auth");
 
         // ODRL delegates (no purpose set), RBAC grants.

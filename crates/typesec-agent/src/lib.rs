@@ -16,7 +16,7 @@
 //! let agent = SecureAgent::new(Arc::new(rbac_engine));
 //!
 //! // 2. Authenticate — type transitions to Authenticated.
-//! let agent = agent.authenticate(Credentials::new("agent:bot", "token"))?;
+//! let agent = agent.authenticate_unverified(Credentials::new("agent:bot", "token"))?;
 //!
 //! // 3. Request a capability — policy checked at runtime, cap minted on success.
 //! let report = Report::new("reports/q1");

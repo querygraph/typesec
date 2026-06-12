@@ -204,9 +204,11 @@ live ledger or Ollama server:
 5. Require `Capability<AiCanInfer, _>` and
    `Capability<CanReadSensitive, _>` before sending plaintext to Ollama.
 
-The local `StaticDidResolver` and `DemoDidKeyStore` are test fixtures, not
-production DID infrastructure. Hyperledger Indy VDR, Universal Resolver,
-DIDComm/JWE, or KMS-backed key material should plug into the same traits.
+The example uses `StaticDidResolver` with `Ed25519DidKeyStore` for Ed25519
+signatures, X25519 key agreement, and ChaCha20-Poly1305 encryption. The optional
+`DemoDidKeyStore` is a non-cryptographic test fixture behind the `demo-crypto`
+feature; Hyperledger Indy VDR, Universal Resolver, DIDComm/JWE, or KMS-backed
+key material can plug into the same traits.
 
 Run it:
 

@@ -61,7 +61,7 @@ pub async fn run(args: RunArgs) -> Result<()> {
     let agent = SecureAgent::new(engine);
     let credentials = Credentials::new(args.agent.clone(), "cli-token");
     let agent = agent
-        .authenticate(credentials)
+        .authenticate_unverified(credentials)
         .map_err(|e| anyhow::anyhow!("auth failed: {e}"))?;
 
     println!("Agent '{}' authenticated ✓", agent.subject());

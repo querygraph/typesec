@@ -65,7 +65,7 @@ async fn main() {
     let engine: Arc<dyn PolicyEngine> = Arc::new(engine);
 
     let agent = SecureAgent::new(engine)
-        .authenticate(Credentials::new("user@example.com", "verified-oidc-token"))
+        .authenticate_unverified(Credentials::new("user@example.com", "verified-oidc-token"))
         .expect("auth ok");
 
     // JWT claims path: the token already carries a broad read permission.

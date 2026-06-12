@@ -115,7 +115,7 @@ mod tests {
     #[tokio::test]
     async fn protected_tool_invokes_with_capability() {
         let agent = SecureAgent::new(Arc::new(AllowAll))
-            .authenticate(Credentials::new("agent:test", "tok"))
+            .authenticate_unverified(Credentials::new("agent:test", "tok"))
             .expect("auth ok");
         let resource = GenericResource::new("Gmail.ListEmails", "tool");
         let cap: Capability<CanExecute, GenericResource> =

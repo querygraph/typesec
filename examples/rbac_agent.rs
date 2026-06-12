@@ -10,7 +10,7 @@
 //! ## What this shows
 //!
 //! 1. **Typestate**: The agent starts as `Unauthenticated` and transitions to
-//!    `Authenticated` via `authenticate()`. Only authenticated agents can request
+//!    `Authenticated` via `authenticate_unverified()` for the demo path. Only authenticated agents can request
 //!    capabilities.
 //!
 //! 2. **Compile-time enforcement**: The `execute` method requires a
@@ -77,7 +77,7 @@ async fn main() {
 
     let agent = SecureAgent::new(engine.clone());
     let agent = agent
-        .authenticate(Credentials::new("agent:data-pipeline", "token-abc"))
+        .authenticate_unverified(Credentials::new("agent:data-pipeline", "token-abc"))
         .expect("auth ok");
 
     let report = GenericResource::new("reports/q1-2025", "report");
@@ -113,7 +113,10 @@ async fn main() {
     // ✗ The analyst can transform the protected value above, but cannot declassify it.
     match agent.request_capability::<CanDeclassify, _>(&report).await {
         Ok(cap) => {
-            let public_digest = report_digest.declassify(&cap).into_public();
+            let public_digest = report_digest
+                .declassify(&cap)
+                .expect("capability covers this resource")
+                .into_public();
             println!("✗ Analyst declassified digest unexpectedly: {public_digest}");
         }
         Err(e) => println!("✓ Declassify denied for analyst (expected): {e}"),
@@ -126,7 +129,7 @@ async fn main() {
 
     let reviewer = SecureAgent::new(engine.clone());
     let reviewer = reviewer
-        .authenticate(Credentials::new("agent:privacy-reviewer", "token-review"))
+        .authenticate_unverified(Credentials::new("agent:privacy-reviewer", "token-review"))
         .expect("auth ok");
 
     let sensitive_summary: SecureValue<Sensitive, String, GenericResource> =
@@ -138,7 +141,10 @@ async fn main() {
         .await
     {
         Ok(cap) => {
-            let public_digest = report_digest.declassify(&cap).into_public();
+            let public_digest = report_digest
+                .declassify(&cap)
+                .expect("capability covers this resource")
+                .into_public();
             println!("✓ Declassified approved digest: {public_digest}");
         }
         Err(e) => println!("✗ Declassify denied unexpectedly: {e}"),
@@ -151,7 +157,7 @@ async fn main() {
 
     let agent2 = SecureAgent::new(engine.clone());
     let agent2 = agent2
-        .authenticate(Credentials::new("agent:deploy-bot", "token-xyz"))
+        .authenticate_unverified(Credentials::new("agent:deploy-bot", "token-xyz"))
         .expect("auth ok");
 
     let code_file = GenericResource::new("code/deploy.sh", "code");
@@ -187,7 +193,7 @@ async fn main() {
 
     let agent3 = SecureAgent::new(engine.clone());
     let agent3 = agent3
-        .authenticate(Credentials::new("agent:superadmin", "token-admin"))
+        .authenticate_unverified(Credentials::new("agent:superadmin", "token-admin"))
         .expect("auth ok");
 
     // Admin inherits everything.

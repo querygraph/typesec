@@ -2,8 +2,9 @@
 //!
 //! Rust's typestate pattern encodes state machine transitions in the type system.
 //! An [`Agent<Unauthenticated>`] has no `request_capability` method — it
-//! literally doesn't exist. You *must* call [`Agent::authenticate`] first,
-//! which returns `Agent<Authenticated>`. Only then do the capability-requesting
+//! literally doesn't exist. You *must* call [`Agent::authenticate_with`]
+//! (or, for tests and demos, [`Agent::authenticate_unverified`]) first, which
+//! returns `Agent<Authenticated>`. Only then do the capability-requesting
 //! methods become available.
 //!
 //! This prevents entire classes of bugs:
@@ -63,6 +64,18 @@ impl Credentials {
     }
 }
 
+/// Verifies credentials and returns the canonical subject identity.
+///
+/// This is the trust root of the typestate machine: the subject string returned
+/// here is what every subsequent policy check and minted capability is bound to.
+/// Implementations should verify the token cryptographically (e.g.
+/// `JwtAuthenticator` in `typesec-integrations`) — never trust the *claimed*
+/// subject without checking it against the verified identity.
+pub trait Authenticator: Send + Sync {
+    /// Verify `credentials`, returning the verified subject on success.
+    fn verify_credentials(&self, credentials: &Credentials) -> Result<String, AgentError>;
+}
+
 /// Error types for agent operations.
 #[derive(Debug, thiserror::Error)]
 pub enum AgentError {
@@ -113,16 +126,42 @@ impl Agent<Unauthenticated> {
         }
     }
 
-    /// Authenticate the agent, producing an `Agent<Authenticated>`.
+    /// Authenticate the agent against a credential verifier.
     ///
-    /// This is the *only* path from `Unauthenticated` to `Authenticated`.
-    /// The typestate transition is irreversible at the type level — you can't
-    /// downgrade an authenticated agent back to unauthenticated.
+    /// The [`Authenticator`] verifies the token and returns the canonical
+    /// subject — the verified identity, not the claimed one — which becomes
+    /// the subject for every policy check and minted capability. This is the
+    /// path production code should take from `Unauthenticated` to
+    /// `Authenticated`; the transition is irreversible at the type level.
+    pub fn authenticate_with(
+        self,
+        credentials: Credentials,
+        authenticator: &dyn Authenticator,
+    ) -> Result<Agent<Authenticated>, AgentError> {
+        let subject = authenticator.verify_credentials(&credentials)?;
+        if subject.is_empty() {
+            return Err(AgentError::AuthFailed {
+                reason: "authenticator returned an empty subject".into(),
+            });
+        }
+
+        tracing::info!(subject = %subject, "agent authenticated");
+
+        Ok(Agent {
+            subject: Some(subject),
+            engine: self.engine,
+            _state: std::marker::PhantomData,
+        })
+    }
+
+    /// Transition to `Authenticated` *without verifying the token*.
     ///
-    /// Authentication here is intentionally minimal: we validate that the subject
-    /// is non-empty and the token is present. Real implementations would verify
-    /// against an identity provider.
-    pub fn authenticate(
+    /// **The claimed subject is trusted as-is.** Only the shape of the
+    /// credentials is checked (non-empty subject and token). This exists for
+    /// examples, tests, and deployments where identity is established out of
+    /// band — production code should use [`authenticate_with`][Self::authenticate_with]
+    /// and a real [`Authenticator`].
+    pub fn authenticate_unverified(
         self,
         credentials: Credentials,
     ) -> Result<Agent<Authenticated>, AgentError> {
@@ -137,7 +176,10 @@ impl Agent<Unauthenticated> {
             });
         }
 
-        tracing::info!(subject = %credentials.subject, "agent authenticated");
+        tracing::warn!(
+            subject = %credentials.subject,
+            "agent authenticated WITHOUT credential verification"
+        );
 
         Ok(Agent {
             subject: Some(credentials.subject),
@@ -174,10 +216,12 @@ mod tests {
     }
 
     #[test]
-    fn authenticate_transitions_state() {
+    fn authenticate_unverified_transitions_state() {
         let agent = Agent::<Unauthenticated>::new(Arc::new(AllowAll));
         let creds = Credentials::new("agent:test", "secret-token");
-        let auth = agent.authenticate(creds).expect("should succeed");
+        let auth = agent
+            .authenticate_unverified(creds)
+            .expect("should succeed");
         assert_eq!(auth.subject(), "agent:test");
     }
 
@@ -186,7 +230,41 @@ mod tests {
         let agent = Agent::<Unauthenticated>::new(Arc::new(AllowAll));
         let creds = Credentials::new("", "token");
         assert!(matches!(
-            agent.authenticate(creds),
+            agent.authenticate_unverified(creds),
+            Err(AgentError::AuthFailed { .. })
+        ));
+    }
+
+    struct FixedSubject(&'static str);
+    impl Authenticator for FixedSubject {
+        fn verify_credentials(&self, credentials: &Credentials) -> Result<String, AgentError> {
+            if credentials.token == "valid-token" {
+                Ok(self.0.to_owned())
+            } else {
+                Err(AgentError::AuthFailed {
+                    reason: "bad token".into(),
+                })
+            }
+        }
+    }
+
+    #[test]
+    fn authenticate_with_uses_verified_subject_not_claimed() {
+        let agent = Agent::<Unauthenticated>::new(Arc::new(AllowAll));
+        // The caller claims to be admin, but the authenticator says otherwise.
+        let creds = Credentials::new("agent:claimed-admin", "valid-token");
+        let auth = agent
+            .authenticate_with(creds, &FixedSubject("agent:verified"))
+            .expect("should succeed");
+        assert_eq!(auth.subject(), "agent:verified");
+    }
+
+    #[test]
+    fn authenticate_with_rejects_bad_token() {
+        let agent = Agent::<Unauthenticated>::new(Arc::new(AllowAll));
+        let creds = Credentials::new("agent:any", "wrong-token");
+        assert!(matches!(
+            agent.authenticate_with(creds, &FixedSubject("agent:verified")),
             Err(AgentError::AuthFailed { .. })
         ));
     }

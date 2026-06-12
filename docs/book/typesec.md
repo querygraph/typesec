@@ -184,9 +184,12 @@ used as verifiable subjects and key-discovery handles, while policy still flows
 through `PolicyEngine`. A DID-wrapped prompt can be verified, decrypted into a
 `SecureValue<Secret, String, GenericResource>`, and sent to Ollama only after
 Typesec mints both the sensitive-read and AI-inference capabilities. The local
-implementation uses a deterministic demo key store for tests; production
-backends should plug in DIDComm/JWE, Hyperledger Indy VDR, or a Universal
-Resolver adapter behind the same resolver trait.
+implementation uses `Ed25519DidKeyStore` for Ed25519 signatures, X25519 key
+agreement, and ChaCha20-Poly1305 payload encryption. A deterministic
+non-cryptographic demo store remains available only for tests or behind the
+`demo-crypto` feature; production backends can also plug in DIDComm/JWE,
+Hyperledger Indy VDR, or a Universal Resolver adapter behind the same resolver
+trait.
 
 The repository also includes:
 
@@ -562,9 +565,11 @@ DidMessageGateway  verifier/decrypter that returns a protected prompt
 DidOllamaClient    Ollama bridge for verified or still-wrapped prompts
 ```
 
-`StaticDidResolver` and `DemoDidKeyStore` make tests deterministic. They are
-not production DID infrastructure. Production deployments should implement the
-same traits with DIDComm/JWE, HPKE, HSM/KMS-backed keys, Hyperledger Indy VDR,
+`StaticDidResolver` keeps local resolution deterministic, and
+`Ed25519DidKeyStore` provides the default local cryptographic key store. The
+optional `DemoDidKeyStore` is non-cryptographic and available only for tests or
+with the `demo-crypto` feature. Production deployments can implement the same
+traits with DIDComm/JWE, HPKE, HSM/KMS-backed keys, Hyperledger Indy VDR,
 `did:web`, `did:key`, or a Universal Resolver client.
 
 ## DID-Wrapped Prompts and Ollama
@@ -604,6 +609,27 @@ let ollama = DidOllamaClient::new("http://localhost:11434", "llama3.2");
 let response = ollama.chat_verified_prompt(verified, &infer, &read)?;
 ```
 
+When the Ollama reply needs to travel with the same authority context as the
+prompt, Typesec can bind the assistant message back to the prompt:
+
+```rust
+let reply = ollama.chat_verified_prompt_bound(
+    verified,
+    gateway_did,
+    &resolver,
+    &key_store,
+    &infer,
+    &read,
+)?;
+```
+
+This returns a new signed and encrypted DID reply envelope. The reply envelope
+uses a fresh DID-shaped id, keeps the prompt's action, resource, and privacy
+metadata, and stores a `reply_to` reference containing the prompt envelope id and
+digest. That reference is included in the reply signature, so the reply cannot
+be detached from the prompt or rebound to a different prompt without invalidating
+the envelope.
+
 There is also a compatibility path for a DID-aware Ollama fork:
 
 ```rust
@@ -626,8 +652,11 @@ cargo run -p typesec-cli --example did_messaging
 It creates two local `did:key` identifiers:
 
 ```rust
-let alice = Did::key(b"alice");
-let gateway_did = Did::key(b"typesec-ollama-gateway");
+let alice_key = Ed25519DidKey::from_seed(b"alice");
+let gateway_key = Ed25519DidKey::from_seed(b"typesec-ollama-gateway");
+
+let alice = Did::key(alice_key.signing_public());
+let gateway_did = Did::key(gateway_key.signing_public());
 ```
 
 Then it registers DID documents in a `StaticDidResolver`, creates a
@@ -635,9 +664,10 @@ Then it registers DID documents in a `StaticDidResolver`, creates a
 and sends the prompt through `DidOllamaClient` only after policy mints
 `Capability<AiCanInfer, _>` and `Capability<CanReadSensitive, _>`.
 
-That example is intentionally offline. It uses `DemoDidKeyStore` and
-`RecordingHttpClient`, so it exercises the Typesec boundary without requiring a
-live Ollama server, a public DID registry, or a Hyperledger ledger.
+That example is intentionally offline. It uses `Ed25519DidKeyStore`,
+`StaticDidResolver`, and `RecordingHttpClient`, so it exercises the Typesec
+boundary without requiring a live Ollama server, a public DID registry, or a
+Hyperledger ledger.
 
 The same trait shape supports more realistic DID methods:
 
@@ -874,7 +904,7 @@ let agent = SecureAgent::new(Arc::new(engine));
 Authentication returns a new type:
 
 ```rust
-let agent = agent.authenticate(Credentials::new("agent:bot", "token"))?;
+let agent = agent.authenticate_with(Credentials::new("agent:bot", token), &jwt_auth)?;
 ```
 
 Only `SecureAgent<Authenticated>` has:
@@ -1395,10 +1425,12 @@ typed capability proves the decision happened
 protected APIs require the proof
 ```
 
-Another tradeoff is that capabilities currently prove a decision at mint time.
-They do not yet model revocation, expiry, lease epochs, or policy-version
-binding. For short-lived operations, this is fine. For long-running agents, the
-system should grow epoch-bound or lease-bound capabilities.
+Another tradeoff is that capabilities prove a decision at mint time. They now
+carry a short lease and consuming APIs reject expired capabilities, which bounds
+the stale-decision window for ordinary operations. They still do not model
+policy-version binding or distributed revocation epochs. For long-running
+agents, the next step is an epoch-bound capability that can be invalidated
+immediately when governance changes.
 
 The CLI is another pragmatic tradeoff. Rust code gets the strongest type-level
 story. Python code gets a subprocess oracle. That is weaker, but useful now. A
@@ -1451,9 +1483,9 @@ delegation for no matching rule or failed permission constraints. That is useful
 for composition, but applications may want clearer distinctions in logs and
 errors.
 
-Fourth, design capability expiry. A capability might carry a policy version, an
-epoch, or a lease deadline. Long-running agents should not keep using a proof
-forever after governance has changed.
+Fourth, extend capability freshness from fixed leases to revocation-aware
+epochs. A capability should eventually carry a policy version or engine epoch,
+so long-running agents cannot keep using a proof after governance has changed.
 
 Fifth, add `typesec check --json`. External agents need stable machine-readable
 answers:
@@ -1487,10 +1519,9 @@ deployments may want generated labels from policy files, capability-bound
 declassification reasons, or audited release records that carry policy version
 and purpose.
 
-Tenth, replace the DID demo crypto with production DIDComm/JWE or HPKE
-implementations. The current `DemoDidKeyStore` is intentionally deterministic
-for tests. Real deployments need audited cryptography, key rotation, replay
-defense, and KMS/HSM integration.
+Tenth, deepen the DID cryptography story beyond the built-in Ed25519/X25519
+local key store. Real deployments still need key rotation, replay defense,
+DIDComm/JWE or HPKE interoperability, and KMS/HSM integration.
 
 Eleventh, add real DID resolver backends. The trait boundary is in place for
 `did:key`, `did:web`, Universal Resolver, and Hyperledger Indy VDR. Those

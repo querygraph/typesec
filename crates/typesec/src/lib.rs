@@ -44,8 +44,8 @@ pub mod integrations {
 pub use typesec_agent::{AgentBuilder, SecureAgent, TaskResult};
 #[cfg(feature = "integrations")]
 pub use typesec_integrations::{
-    ArcadeToolAuthEngine, Did, DidEnvelope, DidMessageGateway, DidOllamaClient, JwtAuthenticator,
-    JwtClaimsEngine, OidcConfig, WorkOsFgaEngine,
+    ArcadeToolAuthEngine, Did, DidEnvelope, DidMessageGateway, DidOllamaClient, Ed25519DidKey,
+    Ed25519DidKeyStore, JwtAuthenticator, JwtClaimsEngine, OidcConfig, WorkOsFgaEngine,
 };
 #[cfg(feature = "odrl")]
 pub use typesec_odrl::OdrlEngine;

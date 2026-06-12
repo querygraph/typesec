@@ -218,7 +218,7 @@ fn install_capture_subscriber() -> AuditCapture {
 async fn test_01_rbac_allow_analyst_reads_report() {
     let engine = Arc::new(RbacEngine::from_yaml(RBAC_ANALYST).expect("parse rbac"));
     let agent = SecureAgent::new(engine)
-        .authenticate(Credentials::new("agent:analyst", "tok"))
+        .authenticate_unverified(Credentials::new("agent:analyst", "tok"))
         .expect("auth ok");
 
     let resource = GenericResource::new("reports/q1", "report");
@@ -238,7 +238,7 @@ async fn test_01_rbac_allow_analyst_reads_report() {
 async fn test_02_rbac_deny_analyst_writes_report() {
     let engine = Arc::new(RbacEngine::from_yaml(RBAC_ANALYST).expect("parse rbac"));
     let agent = SecureAgent::new(engine)
-        .authenticate(Credentials::new("agent:analyst", "tok"))
+        .authenticate_unverified(Credentials::new("agent:analyst", "tok"))
         .expect("auth ok");
 
     let resource = GenericResource::new("reports/q1", "report");
@@ -260,7 +260,7 @@ async fn test_03_lattice_promotes_write_to_read() {
     let lattice_engine: Arc<dyn typesec_core::PolicyEngine> = Arc::new(LatticeEngine::new(inner));
 
     let agent = SecureAgent::new(lattice_engine)
-        .authenticate(Credentials::new("agent:writer", "tok"))
+        .authenticate_unverified(Credentials::new("agent:writer", "tok"))
         .expect("auth ok");
 
     let resource = GenericResource::new("data/file.csv", "data");
