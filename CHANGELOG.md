@@ -7,6 +7,9 @@ by release version, then by the date the logical change landed.
 
 ### 2026-06-12
 
+- Implemented TypeDID agent communications with DID-wrapped send and
+  request/reply modes, secure profile negotiation, A2A/ACP/BAND/HTTPS
+  adapters, examples, tests, and documentation.
 - Updated TypeSec's `grust-graph` dependency and user-facing example snippets
   from 0.6.0 to 0.6.2.
 

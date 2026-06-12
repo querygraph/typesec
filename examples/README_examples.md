@@ -225,6 +225,36 @@ cargo check -p typesec-cli --example did_messaging
 See [`docs/did-messaging.md`](../docs/did-messaging.md) for the local
 Hyperledger Indy/VON Network setup and the `IndyVdrResolver` adapter shape.
 
+## `typedid_agent_communications.rs`
+
+Path:
+
+```text
+examples/typedid_agent_communications.rs
+```
+
+This Rust example demonstrates TypeDID as a secure envelope over agent
+protocols. It shows:
+
+1. A2A-style request/reply delegation with a reply envelope bound to the
+   request digest.
+2. ACP-style send-only editor context.
+3. BAND-style room messaging through the generic `SecureEnvelopeAdapter`.
+4. Profile negotiation with `TypeDidProfile`.
+5. Opaque payload reveal only after `Capability<CanReadSensitive, _>`.
+
+Run it:
+
+```sh
+cargo run -p typesec-cli --example typedid_agent_communications
+```
+
+Check that it still compiles:
+
+```sh
+cargo check -p typesec-cli --example typedid_agent_communications
+```
+
 ## Company Graph Examples
 
 Directory:

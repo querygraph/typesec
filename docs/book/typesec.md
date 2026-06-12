@@ -1061,6 +1061,16 @@ PolicyEngine -> Capability<AiCanInfer, _> and Capability<CanReadSensitive, _>
 Ollama       -> receives plaintext only after typed authority exists
 ```
 
+TypeDID extends that DID boundary from prompt-only messages to agent
+communications. `TypeDidProfile` negotiates the secure envelope profile,
+`TypeDidConversation` binds the outer task, session, or room id plus protocol,
+mode, and profile into the envelope signature, and `TypeDidGateway` opens
+encrypted opaque payload bytes as `SecureValue<Secret, Vec<u8>,
+GenericResource>`. Transport adapters such as `A2aTypeDidAdapter`,
+`AcpTypeDidAdapter`, `BandSecureEnvelopeAdapter`, and `HttpTypeDidAdapter` keep
+A2A, ACP, BAND, and HTTPS responsible for their own lifecycle while TypeDID
+owns cryptographic sender/recipient binding and the Typesec policy handoff.
+
 These engines are not special cases in the capability system. They implement
 the same `PolicyEngine` trait as RBAC, ODRL, and graph policies. That is the
 point: external OAuth and enterprise authorization decisions become ordinary

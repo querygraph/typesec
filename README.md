@@ -175,6 +175,9 @@ The optional `integrations` feature adds provider-facing adapters:
 - **DID messaging** verifies DID-wrapped encrypted prompts, converts plaintext
   into `SecureValue<Secret, _, _>`, and sends prompts to Ollama only after
   typed inference and sensitive-read capabilities exist.
+- **TypeDID agent communications** carry DID-signed encrypted payloads over
+  A2A, ACP, BAND, or direct HTTPS with negotiated profiles, send-only and
+  request/reply modes, and reply binding.
 - **`ProtectedTool`** wraps local tool handlers so invocation requires a
   matching `Capability<P, R>`.
 
@@ -219,6 +222,17 @@ DID envelope
   -> DidOllamaClient can call Ollama or forward the wrapped envelope
 ```
 
+For agent-to-agent communication, TypeDID keeps the same DID and policy
+boundary but treats the encrypted body as opaque protocol payload bytes:
+
+```text
+A2A / ACP / BAND / HTTPS transport
+  -> SecureEnvelopeAdapter wraps payload as application/vnd.typedid.envelope+json
+  -> TypeDID profile negotiation binds protocol, mode, and crypto profile
+  -> TypeDidGateway verifies, decrypts, and protects opaque payload bytes
+  -> PolicyEngine decides whether the verified sender DID can reveal/use them
+```
+
 The repository ships `Ed25519DidKeyStore` (Ed25519 signatures, X25519 key
 agreement, ChaCha20-Poly1305 payload encryption) as the production key store,
 plus `StaticDidResolver` for local resolution. A deterministic,
@@ -229,7 +243,8 @@ VDR, or a Universal Resolver client behind the same traits.
 
 See [`docs/typesec-and-auth-frameworks.md`](docs/typesec-and-auth-frameworks.md),
 [`docs/oauth-provider-integrations.md`](docs/oauth-provider-integrations.md),
-[`docs/did-messaging.md`](docs/did-messaging.md), and
+[`docs/did-messaging.md`](docs/did-messaging.md),
+[`docs/typedid-agent-communications.md`](docs/typedid-agent-communications.md), and
 [`examples/provider_integrations.rs`](examples/provider_integrations.rs).
 
 ### typesec-macro

@@ -604,6 +604,223 @@ impl DidMessageBody {
             reply_to: Some(prompt.prompt_ref.clone()),
         }
     }
+
+    /// Create a general agent message body.
+    pub fn agent_message(resource: impl Into<String>, privacy: impl Into<String>) -> Self {
+        Self {
+            action: "agent:message".to_owned(),
+            resource: resource.into(),
+            privacy: privacy.into(),
+            reply_to: None,
+        }
+    }
+
+    /// Create an agent delegation body.
+    pub fn agent_delegate(resource: impl Into<String>, privacy: impl Into<String>) -> Self {
+        Self {
+            action: "agent:delegate".to_owned(),
+            resource: resource.into(),
+            privacy: privacy.into(),
+            reply_to: None,
+        }
+    }
+}
+
+/// TypeDID delivery mode for an agent message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TypeDidMode {
+    /// Fire-and-forget delivery; no TypeDID reply is required.
+    Send,
+    /// The receiver is expected to answer with a reply-bound TypeDID envelope.
+    RequestReply,
+}
+
+/// TypeDID conversation metadata bound into the envelope signature.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TypeDidConversation {
+    /// Stable task, session, room, or thread id from the outer protocol.
+    pub conversation_id: String,
+    /// Delivery mode.
+    pub mode: TypeDidMode,
+    /// Negotiated TypeDID profile id.
+    pub profile: String,
+    /// Outer protocol hint, such as `a2a`, `acp`, `band`, or `https`.
+    pub protocol: String,
+    /// Optional payload expiry copied from the negotiated profile or caller.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<u64>,
+}
+
+impl TypeDidConversation {
+    /// Construct TypeDID conversation metadata.
+    pub fn new(
+        conversation_id: impl Into<String>,
+        mode: TypeDidMode,
+        profile: impl Into<String>,
+        protocol: impl Into<String>,
+    ) -> Self {
+        Self {
+            conversation_id: conversation_id.into(),
+            mode,
+            profile: profile.into(),
+            protocol: protocol.into(),
+            expires_at: None,
+        }
+    }
+
+    /// Attach an absolute unix-seconds expiry to this conversation metadata.
+    pub fn with_expires_at(mut self, expires_at: u64) -> Self {
+        self.expires_at = Some(expires_at);
+        self
+    }
+}
+
+/// A negotiable TypeDID security profile.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TypeDidProfile {
+    /// Stable profile id.
+    pub id: String,
+    /// Supported DID methods, such as `did:web` or `did:key`.
+    #[serde(default)]
+    pub did_methods: Vec<String>,
+    /// Supported signing algorithms.
+    #[serde(default)]
+    pub signing: Vec<String>,
+    /// Supported key-agreement algorithms.
+    #[serde(default)]
+    pub key_agreement: Vec<String>,
+    /// Supported encryption profiles.
+    #[serde(default)]
+    pub encryption: Vec<String>,
+    /// Supported outer transport bindings.
+    #[serde(default)]
+    pub transport_bindings: Vec<String>,
+    /// Supported TypeDID send modes.
+    #[serde(default)]
+    pub modes: Vec<TypeDidMode>,
+    /// Optional maximum encrypted payload size.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_payload_bytes: Option<usize>,
+    /// Claims required by the remote boundary.
+    #[serde(default)]
+    pub required_claims: Vec<String>,
+    /// Policy actions this profile is willing to carry.
+    #[serde(default)]
+    pub policy_actions: Vec<String>,
+    /// Retention posture advertised by the receiver.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retention: Option<String>,
+    /// Audit posture advertised by the receiver.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audit: Option<String>,
+}
+
+impl TypeDidProfile {
+    /// Default local TypeDID profile backed by the built-in Ed25519/X25519
+    /// key store.
+    pub fn ed25519_x25519_chacha20() -> Self {
+        Self {
+            id: "typedid/v1/x25519-chacha20poly1305-ed25519".to_owned(),
+            did_methods: vec![
+                "did:web".to_owned(),
+                "did:key".to_owned(),
+                "did:indy".to_owned(),
+            ],
+            signing: vec!["Ed25519".to_owned()],
+            key_agreement: vec!["X25519".to_owned()],
+            encryption: vec!["ChaCha20-Poly1305".to_owned()],
+            transport_bindings: vec![
+                "a2a".to_owned(),
+                "acp".to_owned(),
+                "band".to_owned(),
+                "https".to_owned(),
+                "websocket".to_owned(),
+            ],
+            modes: vec![TypeDidMode::Send, TypeDidMode::RequestReply],
+            max_payload_bytes: Some(1024 * 1024),
+            required_claims: vec![
+                "org".to_owned(),
+                "agent_id".to_owned(),
+                "purpose".to_owned(),
+            ],
+            policy_actions: vec![
+                "agent:message".to_owned(),
+                "agent:delegate".to_owned(),
+                "ai:infer".to_owned(),
+            ],
+            retention: Some("sender-encrypted-payload-only".to_owned()),
+            audit: Some("envelope-metadata-and-policy-decision".to_owned()),
+        }
+    }
+
+    /// Return true when this local profile can safely communicate with `remote`.
+    pub fn is_compatible_with(&self, remote: &Self, protocol: &str, mode: TypeDidMode) -> bool {
+        self.id == remote.id
+            && contains(&self.transport_bindings, protocol)
+            && contains(&remote.transport_bindings, protocol)
+            && self.modes.contains(&mode)
+            && remote.modes.contains(&mode)
+            && intersects(&self.did_methods, &remote.did_methods)
+            && intersects(&self.signing, &remote.signing)
+            && intersects(&self.key_agreement, &remote.key_agreement)
+            && intersects(&self.encryption, &remote.encryption)
+    }
+
+    /// Select the first local profile compatible with the remote boundary.
+    pub fn negotiate<'a>(
+        local: &'a [Self],
+        remote: &[Self],
+        protocol: &str,
+        mode: TypeDidMode,
+    ) -> Result<&'a Self, DidError> {
+        local
+            .iter()
+            .find(|candidate| {
+                remote
+                    .iter()
+                    .any(|other| candidate.is_compatible_with(other, protocol, mode))
+            })
+            .ok_or(DidError::NoCompatibleTypeDidProfile)
+    }
+}
+
+/// Resolves TypeDID profiles for a remote agent or boundary.
+pub trait TypeDidProfileResolver: Send + Sync {
+    /// Resolve profiles advertised by `target`.
+    fn resolve_profiles(&self, target: &str) -> Result<Vec<TypeDidProfile>, DidError>;
+}
+
+/// In-memory TypeDID profile resolver for examples and tests.
+#[derive(Debug, Default, Clone)]
+pub struct StaticTypeDidProfileResolver {
+    profiles: HashMap<String, Vec<TypeDidProfile>>,
+}
+
+impl StaticTypeDidProfileResolver {
+    /// Create an empty profile resolver.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Register profiles for a target DID, contact, agent card, or endpoint.
+    pub fn with_profiles(
+        mut self,
+        target: impl Into<String>,
+        profiles: Vec<TypeDidProfile>,
+    ) -> Self {
+        self.profiles.insert(target.into(), profiles);
+        self
+    }
+}
+
+impl TypeDidProfileResolver for StaticTypeDidProfileResolver {
+    fn resolve_profiles(&self, target: &str) -> Result<Vec<TypeDidProfile>, DidError> {
+        self.profiles
+            .get(target)
+            .cloned()
+            .ok_or_else(|| DidError::Unresolved(target.to_owned()))
+    }
 }
 
 /// The prompt context a reply envelope is bound to.
@@ -652,6 +869,9 @@ pub struct DidEnvelope {
     pub expires_time: u64,
     /// Policy-visible message metadata.
     pub body: DidMessageBody,
+    /// Optional TypeDID conversation/profile metadata.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub typedid: Option<TypeDidConversation>,
     /// Key id used for authentication.
     pub kid: String,
     /// Hex-encoded nonce.
@@ -698,6 +918,7 @@ impl DidEnvelope {
             created_time: now,
             expires_time: now + 300,
             body,
+            typedid: None,
             kid,
             nonce: hex_encode(&nonce),
             ciphertext,
@@ -751,6 +972,7 @@ impl DidEnvelope {
                 privacy: prompt_body.privacy.clone(),
                 reply_to: Some(prompt_ref),
             },
+            typedid: None,
             kid,
             nonce: hex_encode(&nonce),
             ciphertext,
@@ -758,6 +980,56 @@ impl DidEnvelope {
         };
         envelope.signature = key_store.sign(&envelope.from, envelope.signing_input().as_bytes())?;
         Ok(envelope)
+    }
+
+    /// Create an encrypted TypeDID agent-message envelope.
+    #[allow(clippy::too_many_arguments)]
+    pub fn typedid(
+        id: impl Into<String>,
+        from: Did,
+        to: Did,
+        body: DidMessageBody,
+        typedid: TypeDidConversation,
+        plaintext: impl AsRef<[u8]>,
+        resolver: &dyn DidResolver,
+        key_store: &dyn DidKeyStore,
+    ) -> Result<Self, DidError> {
+        let mut envelope = Self::prompt(id, from, to, body, plaintext, resolver, key_store)?;
+        envelope.message_type = "https://typesec.dev/did/message/v1/typedid".to_owned();
+        envelope.typedid = Some(typedid);
+        envelope.signature = key_store.sign(&envelope.from, envelope.signing_input().as_bytes())?;
+        Ok(envelope)
+    }
+
+    /// Create an encrypted TypeDID reply envelope bound to a verified request.
+    pub fn typedid_reply(
+        id: impl Into<String>,
+        from: Did,
+        to: Did,
+        request: &VerifiedTypeDidMessage,
+        plaintext: impl AsRef<[u8]>,
+        resolver: &dyn DidResolver,
+        key_store: &dyn DidKeyStore,
+    ) -> Result<Self, DidError> {
+        let mut body = request.body.clone();
+        body.reply_to = Some(request.message_ref.clone());
+        let conversation = TypeDidConversation {
+            conversation_id: request.conversation.conversation_id.clone(),
+            mode: TypeDidMode::RequestReply,
+            profile: request.conversation.profile.clone(),
+            protocol: request.conversation.protocol.clone(),
+            expires_at: request.conversation.expires_at,
+        };
+        Self::typedid(
+            id,
+            from,
+            to,
+            body,
+            conversation,
+            plaintext,
+            resolver,
+            key_store,
+        )
     }
 
     /// Stable reference to this signed envelope for reply binding.
@@ -779,8 +1051,8 @@ impl DidEnvelope {
             .as_ref()
             .map(|reference| format!("{}\n{}", reference.id, reference.digest))
             .unwrap_or_default();
-        format!(
-            "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
+        let base = format!(
+            "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
             self.id,
             self.message_type,
             self.from,
@@ -794,10 +1066,36 @@ impl DidEnvelope {
             self.body.action,
             self.body.resource,
             self.body.privacy,
-            reply_to,
-            self.ciphertext
-        )
+            reply_to
+        );
+        if let Some(typedid) = self.typedid.as_ref() {
+            format!(
+                "{}\n{}\n{}",
+                base,
+                canonical_typedid_conversation(typedid),
+                self.ciphertext
+            )
+        } else {
+            format!("{}\n{}", base, self.ciphertext)
+        }
     }
+}
+
+/// Verified and decrypted TypeDID agent message.
+#[derive(Debug)]
+pub struct VerifiedTypeDidMessage {
+    /// Verified DID subject.
+    pub subject: Did,
+    /// Stable reference to the verified envelope.
+    pub message_ref: DidMessageReference,
+    /// Policy-visible message metadata.
+    pub body: DidMessageBody,
+    /// TypeDID conversation/profile metadata.
+    pub conversation: TypeDidConversation,
+    /// Resource associated with the payload.
+    pub resource: GenericResource,
+    /// Secret opaque payload bytes.
+    pub payload: SecureValue<Secret, Vec<u8>, GenericResource>,
 }
 
 /// Verified and decrypted DID prompt.
@@ -838,6 +1136,18 @@ impl DidMessageGateway {
 
     /// Verify, decrypt, and protect a DID prompt envelope.
     pub fn open_prompt(&self, envelope: &DidEnvelope) -> Result<VerifiedDidPrompt, DidError> {
+        let opened = self.open_bytes(envelope)?;
+        let prompt = String::from_utf8(opened.plaintext).map_err(|_| DidError::InvalidUtf8)?;
+        Ok(VerifiedDidPrompt {
+            subject: opened.subject,
+            prompt_ref: opened.message_ref,
+            body: opened.body,
+            prompt: SecureValue::protect(prompt, &opened.resource),
+            resource: opened.resource,
+        })
+    }
+
+    fn open_bytes(&self, envelope: &DidEnvelope) -> Result<OpenedDidEnvelope, DidError> {
         if !envelope.to.iter().any(|did| did == &self.recipient) {
             return Err(DidError::WrongRecipient(self.recipient.to_string()));
         }
@@ -864,16 +1174,163 @@ impl DidMessageGateway {
             &nonce,
             &envelope.ciphertext,
         )?;
-        let prompt = String::from_utf8(plaintext).map_err(|_| DidError::InvalidUtf8)?;
         let resource = GenericResource::new(&envelope.body.resource, "did-prompt");
 
-        Ok(VerifiedDidPrompt {
+        Ok(OpenedDidEnvelope {
             subject: envelope.from.clone(),
-            prompt_ref: envelope.reference(),
+            message_ref: envelope.reference(),
             body: envelope.body.clone(),
-            prompt: SecureValue::protect(prompt, &resource),
             resource,
+            plaintext,
         })
+    }
+}
+
+#[derive(Debug)]
+struct OpenedDidEnvelope {
+    subject: Did,
+    message_ref: DidMessageReference,
+    body: DidMessageBody,
+    resource: GenericResource,
+    plaintext: Vec<u8>,
+}
+
+/// Verifies TypeDID envelopes and protects arbitrary agent payload bytes.
+pub struct TypeDidGateway {
+    inner: DidMessageGateway,
+}
+
+impl TypeDidGateway {
+    /// Create a TypeDID gateway for one local recipient DID.
+    pub fn new(
+        resolver: Arc<dyn DidResolver>,
+        key_store: Arc<dyn DidKeyStore>,
+        recipient: Did,
+    ) -> Self {
+        Self {
+            inner: DidMessageGateway::new(resolver, key_store, recipient),
+        }
+    }
+
+    /// Verify, decrypt, and protect a TypeDID message envelope.
+    pub fn open_message(&self, envelope: &DidEnvelope) -> Result<VerifiedTypeDidMessage, DidError> {
+        let conversation = envelope
+            .typedid
+            .clone()
+            .ok_or(DidError::MissingTypeDidMetadata)?;
+        let opened = self.inner.open_bytes(envelope)?;
+        Ok(VerifiedTypeDidMessage {
+            subject: opened.subject,
+            message_ref: opened.message_ref,
+            body: opened.body,
+            conversation,
+            payload: SecureValue::protect(opened.plaintext, &opened.resource),
+            resource: opened.resource,
+        })
+    }
+}
+
+/// Common interface for TypeDID secure-envelope transport adapters.
+pub trait SecureEnvelopeAdapter {
+    /// Adapter protocol name.
+    fn protocol(&self) -> &str;
+
+    /// Media type this adapter carries over its outer protocol.
+    fn content_type(&self) -> &'static str {
+        "application/vnd.typedid.envelope+json"
+    }
+
+    /// Wrap a payload in a TypeDID envelope for this adapter's protocol.
+    fn wrap(
+        &self,
+        request: TypeDidWrapRequest<'_>,
+        resolver: &dyn DidResolver,
+        key_store: &dyn DidKeyStore,
+    ) -> Result<DidEnvelope, DidError> {
+        let profile = TypeDidProfile::negotiate(
+            request.local_profiles,
+            request.remote_profiles,
+            self.protocol(),
+            request.mode,
+        )?;
+        let conversation = TypeDidConversation::new(
+            request.conversation_id,
+            request.mode,
+            profile.id.clone(),
+            self.protocol(),
+        );
+        DidEnvelope::typedid(
+            request.id,
+            request.from,
+            request.to,
+            request.body,
+            conversation,
+            request.payload,
+            resolver,
+            key_store,
+        )
+    }
+}
+
+/// Inputs for wrapping a payload in a TypeDID transport adapter.
+pub struct TypeDidWrapRequest<'a> {
+    /// Envelope id.
+    pub id: String,
+    /// Sender DID.
+    pub from: Did,
+    /// Recipient DID.
+    pub to: Did,
+    /// Outer conversation/task/room/session id.
+    pub conversation_id: String,
+    /// Send mode.
+    pub mode: TypeDidMode,
+    /// Policy-visible body.
+    pub body: DidMessageBody,
+    /// Plaintext payload bytes.
+    pub payload: &'a [u8],
+    /// Local TypeDID profiles.
+    pub local_profiles: &'a [TypeDidProfile],
+    /// Remote TypeDID profiles.
+    pub remote_profiles: &'a [TypeDidProfile],
+}
+
+/// A2A TypeDID content adapter.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct A2aTypeDidAdapter;
+
+impl SecureEnvelopeAdapter for A2aTypeDidAdapter {
+    fn protocol(&self) -> &str {
+        "a2a"
+    }
+}
+
+/// ACP TypeDID content adapter.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct AcpTypeDidAdapter;
+
+impl SecureEnvelopeAdapter for AcpTypeDidAdapter {
+    fn protocol(&self) -> &str {
+        "acp"
+    }
+}
+
+/// BAND secure-envelope adapter for TypeDID payloads.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct BandSecureEnvelopeAdapter;
+
+impl SecureEnvelopeAdapter for BandSecureEnvelopeAdapter {
+    fn protocol(&self) -> &str {
+        "band"
+    }
+}
+
+/// Direct HTTPS TypeDID content adapter.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct HttpTypeDidAdapter;
+
+impl SecureEnvelopeAdapter for HttpTypeDidAdapter {
+    fn protocol(&self) -> &str {
+        "https"
     }
 }
 
@@ -1032,6 +1489,12 @@ pub enum DidError {
     /// Ollama response did not contain an assistant message.
     #[error("Ollama response did not contain message.content")]
     MissingOllamaReply,
+    /// A TypeDID envelope did not include TypeDID metadata.
+    #[error("DID envelope is missing TypeDID metadata")]
+    MissingTypeDidMetadata,
+    /// Local and remote TypeDID profiles did not overlap.
+    #[error("no compatible TypeDID profile")]
+    NoCompatibleTypeDidProfile,
 }
 
 fn ollama_reply_content(response: &Value) -> Result<&str, DidError> {
@@ -1064,6 +1527,28 @@ fn random_nonce() -> Result<[u8; 12], DidError> {
     let mut nonce = [0u8; 12];
     getrandom::getrandom(&mut nonce).map_err(|e| DidError::KeyGen(e.to_string()))?;
     Ok(nonce)
+}
+
+fn canonical_typedid_conversation(conversation: &TypeDidConversation) -> String {
+    format!(
+        "{}\n{:?}\n{}\n{}\n{}",
+        conversation.conversation_id,
+        conversation.mode,
+        conversation.profile,
+        conversation.protocol,
+        conversation
+            .expires_at
+            .map(|expires_at| expires_at.to_string())
+            .unwrap_or_default()
+    )
+}
+
+fn contains(values: &[String], needle: &str) -> bool {
+    values.iter().any(|value| value == needle)
+}
+
+fn intersects(left: &[String], right: &[String]) -> bool {
+    left.iter().any(|value| right.contains(value))
 }
 
 #[cfg(any(test, feature = "demo-crypto"))]
@@ -1201,6 +1686,26 @@ mod tests {
         (alice, agent, resolver, keys)
     }
 
+    struct AgentPolicy {
+        allowed_subject: String,
+    }
+
+    impl PolicyEngine for AgentPolicy {
+        fn check(&self, subject: &str, action: &str, resource: &str) -> PolicyResult {
+            if subject == self.allowed_subject
+                && matches!(
+                    action,
+                    "agent:message" | "agent:delegate" | "read_sensitive"
+                )
+                && resource == "room/acme-support"
+            {
+                PolicyResult::Allow
+            } else {
+                PolicyResult::Deny("agent message denied".to_owned())
+            }
+        }
+    }
+
     #[test]
     fn dids_parse_and_reject_bad_values() {
         assert!(Did::parse("did:web:example.com").is_ok());
@@ -1303,6 +1808,147 @@ mod tests {
             requests[0].body.as_ref().unwrap()["messages"][0]["content"],
             "private prompt"
         );
+    }
+
+    #[test]
+    fn typedid_profile_negotiates_on_protocol_and_mode() {
+        let local = vec![TypeDidProfile::ed25519_x25519_chacha20()];
+        let remote = vec![TypeDidProfile::ed25519_x25519_chacha20()];
+        let selected = TypeDidProfile::negotiate(&local, &remote, "a2a", TypeDidMode::RequestReply)
+            .expect("compatible profile");
+        assert_eq!(selected.id, "typedid/v1/x25519-chacha20poly1305-ed25519");
+
+        assert!(matches!(
+            TypeDidProfile::negotiate(&local, &remote, "smtp", TypeDidMode::Send),
+            Err(DidError::NoCompatibleTypeDidProfile)
+        ));
+    }
+
+    #[test]
+    fn typedid_adapter_wraps_and_gateway_opens_opaque_payload() {
+        let (alice, agent, resolver, keys) = fixture();
+        let profiles = vec![TypeDidProfile::ed25519_x25519_chacha20()];
+        let adapter = A2aTypeDidAdapter;
+        let payload =
+            br#"{"jsonrpc":"2.0","method":"message/send","params":{"text":"triage case"}}"#;
+
+        let envelope = adapter
+            .wrap(
+                TypeDidWrapRequest {
+                    id: "a2a-msg-1".to_owned(),
+                    from: alice.clone(),
+                    to: agent.clone(),
+                    conversation_id: "task/a2a-123".to_owned(),
+                    mode: TypeDidMode::RequestReply,
+                    body: DidMessageBody::agent_delegate("room/acme-support", "secret"),
+                    payload,
+                    local_profiles: &profiles,
+                    remote_profiles: &profiles,
+                },
+                &resolver,
+                &keys,
+            )
+            .expect("wrapped envelope");
+
+        assert_eq!(
+            adapter.content_type(),
+            "application/vnd.typedid.envelope+json"
+        );
+        assert_eq!(
+            envelope.message_type,
+            "https://typesec.dev/did/message/v1/typedid"
+        );
+        assert_eq!(envelope.typedid.as_ref().unwrap().protocol, "a2a");
+        assert_ne!(envelope.ciphertext.as_bytes(), payload);
+
+        let gateway = TypeDidGateway::new(Arc::new(resolver), Arc::new(keys), agent);
+        let verified = gateway.open_message(&envelope).expect("verified typedid");
+        assert_eq!(verified.subject, alice);
+        assert_eq!(verified.conversation.conversation_id, "task/a2a-123");
+        assert_eq!(verified.body.action, "agent:delegate");
+
+        let read = mint_capability::<CanReadSensitive, _>(
+            &AgentPolicy {
+                allowed_subject: verified.subject.to_string(),
+            },
+            verified.subject.as_str(),
+            &verified.resource,
+        )
+        .expect("read cap");
+        assert_eq!(verified.payload.reveal(&read).expect("payload"), payload);
+    }
+
+    #[test]
+    fn typedid_reply_is_bound_to_request_envelope() {
+        let (alice, agent, resolver, keys) = fixture();
+        let request = DidEnvelope::typedid(
+            "band-room-msg-1",
+            alice.clone(),
+            agent.clone(),
+            DidMessageBody::agent_message("room/acme-support", "secret"),
+            TypeDidConversation::new(
+                "room/acme-support",
+                TypeDidMode::RequestReply,
+                TypeDidProfile::ed25519_x25519_chacha20().id,
+                "band",
+            ),
+            b"please coordinate with the support agent",
+            &resolver,
+            &keys,
+        )
+        .expect("request envelope");
+        let request_ref = request.reference();
+        let gateway = TypeDidGateway::new(
+            Arc::new(resolver.clone()),
+            Arc::new(keys.clone()),
+            agent.clone(),
+        );
+        let verified = gateway.open_message(&request).expect("verified request");
+        let reply = DidEnvelope::typedid_reply(
+            "band-room-reply-1",
+            agent.clone(),
+            alice.clone(),
+            &verified,
+            b"support agent accepted the handoff",
+            &resolver,
+            &keys,
+        )
+        .expect("reply envelope");
+
+        assert_eq!(reply.typedid.as_ref().unwrap().protocol, "band");
+        assert_eq!(reply.body.reply_to, Some(request_ref));
+
+        let reply_gateway = TypeDidGateway::new(Arc::new(resolver), Arc::new(keys), alice);
+        let opened_reply = reply_gateway.open_message(&reply).expect("opened reply");
+        assert_eq!(opened_reply.subject, agent);
+    }
+
+    #[test]
+    fn typedid_signature_covers_conversation_metadata() {
+        let (alice, agent, resolver, keys) = fixture();
+        let mut envelope = DidEnvelope::typedid(
+            "acp-session-msg-1",
+            alice,
+            agent.clone(),
+            DidMessageBody::agent_message("room/acme-support", "secret"),
+            TypeDidConversation::new(
+                "session/editor-1",
+                TypeDidMode::Send,
+                TypeDidProfile::ed25519_x25519_chacha20().id,
+                "acp",
+            ),
+            b"review this private diff",
+            &resolver,
+            &keys,
+        )
+        .expect("typedid envelope");
+        envelope.typedid.as_mut().unwrap().protocol = "band".to_owned();
+
+        let gateway = TypeDidGateway::new(Arc::new(resolver), Arc::new(keys), agent);
+        assert!(matches!(
+            gateway.open_message(&envelope),
+            Err(DidError::InvalidSignature)
+        ));
     }
 
     #[test]

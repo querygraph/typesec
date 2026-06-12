@@ -17,6 +17,10 @@ The integration lives in `typesec-integrations::did` and provides:
   wrapped prompt to a DID-aware Ollama fork.
 - `DidMessageReference` for binding a reply envelope to the exact signed prompt
   envelope that produced it.
+- TypeDID agent-communication helpers: `TypeDidMode`,
+  `TypeDidConversation`, `TypeDidProfile`, `TypeDidGateway`,
+  `SecureEnvelopeAdapter`, `A2aTypeDidAdapter`, `AcpTypeDidAdapter`,
+  `BandSecureEnvelopeAdapter`, and `HttpTypeDidAdapter`.
 
 `Ed25519DidKeyStore` is the default local implementation: Ed25519 signatures,
 X25519 key agreement, and ChaCha20-Poly1305 payload encryption. The deterministic
@@ -121,6 +125,43 @@ let reply = ollama.chat_verified_prompt_bound(
 
 This mirrors the production control flow even though the example uses
 deterministic local keys and a recording HTTP client.
+
+## TypeDID Agent Communications
+
+TypeDID generalizes the DID prompt envelope for agent-to-agent communication.
+It keeps A2A, ACP, BAND, HTTPS, or another protocol in charge of discovery,
+tasks, rooms, sessions, streaming, and routing while TypeDID provides the
+security envelope:
+
+```text
+outer protocol        -> task/session/room lifecycle
+TypeDID envelope      -> sender DID, recipient DID, profile, mode, ciphertext
+TypeDidGateway        -> verify, decrypt, protect opaque payload bytes
+Typesec PolicyEngine  -> decide whether the verified DID can reveal/use payload
+```
+
+`TypeDidProfile::negotiate` selects a mutually supported secure profile across
+a boundary. The selected profile id and protocol binding are signed inside
+`TypeDidConversation`, so a relay cannot rewrite an A2A envelope into a BAND
+room message or downgrade the security profile without invalidating the
+signature.
+
+TypeDID supports two modes:
+
+```text
+send           authenticated encrypted delivery; no TypeDID reply required
+request_reply  receiver answers with a reply envelope bound to request digest
+```
+
+The runnable example shows A2A-style request/reply, ACP-style send-only, and a
+BAND-style room message through the generic secure-envelope adapter:
+
+```sh
+cargo run -p typesec-cli --example typedid_agent_communications
+```
+
+See [`typedid-agent-communications.md`](typedid-agent-communications.md) for
+the design details and adapter guidance.
 
 ## DID Shapes to Support
 

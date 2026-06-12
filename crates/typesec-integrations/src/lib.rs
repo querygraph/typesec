@@ -14,13 +14,16 @@ pub mod jwt;
 pub mod workos;
 
 pub use arcade::{ArcadeToolAuthEngine, ArcadeToolAuthRequest};
+pub use did::{
+    A2aTypeDidAdapter, AcpTypeDidAdapter, BandSecureEnvelopeAdapter, Did, DidDocument, DidEnvelope,
+    DidError, DidKeyStore, DidMessageBody, DidMessageGateway, DidMessageReference, DidOllamaClient,
+    DidReplyBinding, DidResolver, DidService, Ed25519DidKey, Ed25519DidKeyStore,
+    HttpTypeDidAdapter, SecureEnvelopeAdapter, StaticDidResolver, StaticTypeDidProfileResolver,
+    TypeDidConversation, TypeDidGateway, TypeDidMode, TypeDidProfile, TypeDidProfileResolver,
+    TypeDidWrapRequest, VerificationMethod, VerifiedDidPrompt, VerifiedTypeDidMessage,
+};
 #[cfg(feature = "demo-crypto")]
 pub use did::{DemoDidKeyPair, DemoDidKeyStore};
-pub use did::{
-    Did, DidDocument, DidEnvelope, DidError, DidKeyStore, DidMessageBody, DidMessageGateway,
-    DidMessageReference, DidOllamaClient, DidReplyBinding, DidResolver, DidService, Ed25519DidKey,
-    Ed25519DidKeyStore, StaticDidResolver, VerificationMethod, VerifiedDidPrompt,
-};
 pub use http::{HttpClient, ReqwestHttpClient};
 pub use jwt::{JwtAuthenticator, JwtClaims, JwtClaimsEngine, OidcConfig, VerifiedSubject};
 pub use workos::{WorkOsFgaEngine, WorkOsFgaRequest, WorkOsResource};
