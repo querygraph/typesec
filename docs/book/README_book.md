@@ -19,7 +19,7 @@ Keep stable EPUB metadata in `docs/book/metadata.yaml`. The build script passes
 that file to Pandoc and overrides the publication date with the current UTC
 date. After Pandoc writes the EPUB, the layout fixer updates only the OPF
 package title used by Kindle libraries to the generated `kindle_name`, for
-example `typesec (0.5.0)`. The name comes from `title_stem` in
+example `typesec (0.6.0)`. The name comes from `title_stem` in
 `docs/book/metadata.yaml` plus `[workspace.package].version` in the root
 `Cargo.toml`.
 
@@ -80,9 +80,9 @@ empty generated title page before the custom cover.
 
 The visible cover, NCX title, and navigation title still say `Typesec`, while
 the OPF metadata title used by Kindle libraries comes from a short distribution
-title plus the workspace version, for example `typesec (0.5.0)`. The build keeps
+title plus the workspace version, for example `typesec (0.6.0)`. The build keeps
 the stable title-stem EPUB at `docs/book/dist/typesec.epub` and creates a
-versioned Send to Kindle symlink, `docs/book/dist/typesec (0.5.0).epub`, that
+versioned Send to Kindle symlink, `docs/book/dist/typesec (0.6.0).epub`, that
 points back to it. `docs/book/dist/VERSION.md` records the Kindle name, build
 date, stable EPUB filename, and symlink filename.
 

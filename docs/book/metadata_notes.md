@@ -65,14 +65,14 @@ generated dist markers.
 
 For books that are repeatedly sent to Kindle during development, the title
 shown in the Kindle library should be generated from a short distribution title
-and the current project version, for example `typesec (0.5.0)`. This short title
+and the current project version, for example `typesec (0.6.0)`. This short title
 may be different from the full visible book title, especially for books with
 long titles or titles containing colons. Keep the visible book title in the
 checked-in metadata file, then post-process only the Kindle/catalog metadata in
 `EPUB/content.opf` after Pandoc builds the EPUB:
 
 ```sh
-version="0.5.0"
+version="0.6.0"
 kindle_short_title="$(
   awk -F: '
     $1 ~ /^[[:space:]]*title_stem[[:space:]]*$/ {
@@ -99,8 +99,8 @@ clean book title while the Kindle library entry distinguishes uploaded editions.
 After the post-processing step, `EPUB/content.opf` should contain:
 
 ```xml
-<dc:title id="epub-title-1">typesec (0.5.0)</dc:title>
-<meta refines="#epub-title-1" property="file-as">typesec (0.5.0)</meta>
+<dc:title id="epub-title-1">typesec (0.6.0)</dc:title>
+<meta refines="#epub-title-1" property="file-as">typesec (0.6.0)</meta>
 ```
 
 while `EPUB/nav.xhtml`, `EPUB/toc.ncx`, and the cover XHTML should still display
@@ -126,7 +126,7 @@ sed "s/{{KINDLE_NAME}}/$kindle_name/g" cover.md > "$tmpdir/cover.md"
 ```
 
 The visible title remains `Typesec`; the small subtitle can say
-`covers typesec (0.5.0)` because it is generated from the same catalog name as
+`covers typesec (0.6.0)` because it is generated from the same catalog name as
 the Kindle metadata.
 
 ## Kindle Library Title Rules
@@ -134,12 +134,12 @@ the Kindle metadata.
 Treat the Kindle library card as a separate catalog surface from the book's
 visible title page. The visible title, navigation, NCX, and table-of-contents
 headings can and usually should remain stable, with the clean book title such
-as `Typesec`. The generated catalog name, such as `typesec (0.5.0)`, belongs in
+as `Typesec`. The generated catalog name, such as `typesec (0.6.0)`, belongs in
 Kindle-facing metadata, upload filenames, `VERSION.md`, and any explicit small
-build subtitle such as `covers typesec (0.5.0)`.
+build subtitle such as `covers typesec (0.6.0)`.
 
 If a modern Kindle shows a bare lowercase title such as `typesec` even though
-the intended catalog name is `typesec (0.5.0)`, look for catalog fallbacks rather
+the intended catalog name is `typesec (0.6.0)`, look for catalog fallbacks rather
 than changing the visible book. In the Typesec EPUB, the failure sources were:
 
 - OPF package metadata that did not match the desired generated Kindle name
@@ -150,8 +150,8 @@ Fix both surfaces from the same variable. Set the OPF title and title-sort
 metadata to the intended library card string:
 
 ```xml
-<dc:title id="epub-title-1">typesec (0.5.0)</dc:title>
-<meta refines="#epub-title-1" property="file-as">typesec (0.5.0)</meta>
+<dc:title id="epub-title-1">typesec (0.6.0)</dc:title>
+<meta refines="#epub-title-1" property="file-as">typesec (0.6.0)</meta>
 ```
 
 Then create a Send to Kindle upload copy with the same basename, and write a
@@ -256,7 +256,7 @@ source Markdown. A good metadata gate should fail the build if:
 Run this check before converting the EPUB to MOBI, AZW3, or any Kindle-facing
 format. That way downstream artifacts cannot be generated from a broken EPUB.
 If the generated Kindle name contains punctuation, such as parentheses in
-`typesec (0.5.0)`, validators that use `grep -E` must escape the expected title
+`typesec (0.6.0)`, validators that use `grep -E` must escape the expected title
 before interpolating it into a regex. Otherwise a correct OPF title can fail the
 check because the punctuation is interpreted as regex syntax.
 
@@ -286,15 +286,15 @@ unzip -p dist/book.epub EPUB/nav.xhtml
 Check that the Kindle upload filename cannot fall back to a lowercase title:
 
 ```sh
-ls -lh "dist/typesec (0.5.0).epub"
-cmp -s dist/book.epub "dist/typesec (0.5.0).epub"
+ls -lh "dist/typesec (0.6.0).epub"
+cmp -s dist/book.epub "dist/typesec (0.6.0).epub"
 cat dist/VERSION.md
 ```
 
 For example, `dist/VERSION.md` should look like:
 
 ```text
-kindle_name: typesec (0.5.0)
+kindle_name: typesec (0.6.0)
 built_at: 2026-06-10
 ```
 

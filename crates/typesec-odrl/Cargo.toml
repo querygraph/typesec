@@ -8,7 +8,7 @@ repository.workspace = true
 description = "ODRL policy engine for typesec — W3C digital rights language subset"
 
 [dependencies]
-typesec-core = { version = "0.5.0", path = "../typesec-core" }
+typesec-core = { version = "0.6.0", path = "../typesec-core" }
 serde = { workspace = true }
 serde_yaml = { workspace = true }
 chrono = { workspace = true }

@@ -8,7 +8,7 @@ repository.workspace = true
 description = "RBAC policy engine for typesec — YAML → typed enforcement"
 
 [dependencies]
-typesec-core = { version = "0.5.0", path = "../typesec-core" }
+typesec-core = { version = "0.6.0", path = "../typesec-core" }
 serde = { workspace = true }
 serde_yaml = { workspace = true }
 serde_json = { workspace = true }

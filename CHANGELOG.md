@@ -5,6 +5,8 @@ by release version, then by the date the logical change landed.
 
 ## Unreleased
 
+## 0.6.0
+
 ### 2026-06-12
 
 - Added a TypeDID ecosystem strategy covering LangChain, Pydantic AI, MCP,
@@ -17,6 +19,10 @@ by release version, then by the date the logical change landed.
   adapters, examples, tests, and documentation.
 - Updated TypeSec's `grust-graph` dependency and user-facing example snippets
   from 0.6.0 to 0.6.2.
+- Prepared the 0.6.0 release by bumping workspace crate versions, Python
+  package metadata, release-facing docs, and generated book artifacts; verified
+  the release-prep path with workspace metadata, build, test, Python smoke,
+  DID/TypeDID examples, book validation, and package checks.
 
 ### 2026-06-12 (Claude follow-up after the 0.5.0 hardening pass)
 
