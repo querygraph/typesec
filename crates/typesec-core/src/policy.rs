@@ -24,9 +24,11 @@
 //! [`set_audit_sink`] for a guaranteed write path.
 
 use std::sync::{Arc, OnceLock, RwLock};
+use std::time::{Duration, SystemTime};
 
 use tracing::info;
 
+use crate::capability::{DEFAULT_CAPABILITY_TTL, RevocationEpoch};
 use crate::{Capability, Permission, Resource};
 
 /// The verdict returned by a policy engine.
@@ -206,8 +208,65 @@ pub fn mint_capability<P: Permission, R: Resource>(
     subject: &str,
     resource: &R,
 ) -> Result<Capability<P, R>, CapabilityError> {
+    mint_capability_for_id(
+        engine,
+        subject,
+        resource.resource_id(),
+        &MintOptions::default(),
+    )
+}
+
+/// Lease parameters for capability minting.
+///
+/// Defaults match plain [`mint_capability`]: the
+/// [`DEFAULT_CAPABILITY_TTL`] lease and no revocation binding.
+#[derive(Clone, Debug)]
+pub struct MintOptions {
+    /// How long the minted capability stays usable. Pick per risk: a
+    /// `CanDeclassify` capability warrants seconds; a low-risk read can hold
+    /// the default 5 minutes or longer.
+    pub ttl: Duration,
+    /// Optional shared revocation epoch. Capabilities minted with one can be
+    /// invalidated mid-lease by calling [`RevocationEpoch::revoke_all`]
+    /// (e.g. after a policy reload).
+    pub revocation: Option<RevocationEpoch>,
+}
+
+impl Default for MintOptions {
+    fn default() -> Self {
+        Self {
+            ttl: DEFAULT_CAPABILITY_TTL,
+            revocation: None,
+        }
+    }
+}
+
+/// Like [`mint_capability`], but with explicit lease parameters.
+pub fn mint_capability_with<P: Permission, R: Resource>(
+    engine: &dyn PolicyEngine,
+    subject: &str,
+    resource: &R,
+    options: &MintOptions,
+) -> Result<Capability<P, R>, CapabilityError> {
+    mint_capability_for_id(engine, subject, resource.resource_id(), options)
+}
+
+/// Mint a capability for a resource identified only by its id string.
+///
+/// This exists so async callers can move owned strings onto a blocking thread
+/// (the policy check may do I/O — see `SecureAgent::request_capability`)
+/// without needing `R: Send` or a reference that outlives the spawn. The
+/// resulting capability is bound to `resource_id` exactly as if the `&R` form
+/// had been used: every consumption site (`execute`, `reveal`, `declassify`)
+/// still compares ids at use time, so naming a mismatched `R` type buys an
+/// attacker nothing — the capability only covers the id the engine approved.
+pub fn mint_capability_for_id<P: Permission, R: Resource>(
+    engine: &dyn PolicyEngine,
+    subject: &str,
+    resource_id: &str,
+    options: &MintOptions,
+) -> Result<Capability<P, R>, CapabilityError> {
     let action = P::name();
-    let resource_id = resource.resource_id();
 
     let result = engine.check(subject, action, resource_id);
 
@@ -222,7 +281,13 @@ pub fn mint_capability<P: Permission, R: Resource>(
     record_audit(&event);
 
     match result {
-        PolicyResult::Allow => Ok(Capability::new_unchecked(subject, resource_id)),
+        PolicyResult::Allow => Ok(Capability::new_minted(
+            subject,
+            resource_id,
+            SystemTime::now(),
+            options.ttl,
+            options.revocation.clone(),
+        )),
         PolicyResult::Deny(reason) => Err(CapabilityError::Denied { reason }),
         PolicyResult::Delegate(_) => Err(CapabilityError::UnhandledDelegation),
     }
@@ -286,6 +351,36 @@ mod tests {
         let result: Result<Capability<CanRead, GenericResource>, _> =
             mint_capability(&engine, "agent:test", &resource);
         assert!(matches!(result, Err(CapabilityError::Denied { .. })));
+    }
+
+    #[test]
+    fn mint_with_revocation_epoch_supports_mid_lease_revocation() {
+        let engine = AllowAll;
+        let resource = GenericResource::new("reports/q1", "report");
+        let epoch = RevocationEpoch::new();
+        let options = MintOptions {
+            revocation: Some(epoch.clone()),
+            ..MintOptions::default()
+        };
+        let cap: Capability<CanRead, GenericResource> =
+            mint_capability_with(&engine, "agent:test", &resource, &options).expect("allow");
+
+        cap.ensure_active().expect("active before revocation");
+        epoch.revoke_all();
+        assert!(cap.ensure_active().is_err());
+    }
+
+    #[test]
+    fn mint_with_short_ttl_expires() {
+        let engine = AllowAll;
+        let resource = GenericResource::new("reports/q1", "report");
+        let options = MintOptions {
+            ttl: Duration::ZERO,
+            ..MintOptions::default()
+        };
+        let cap: Capability<CanRead, GenericResource> =
+            mint_capability_with(&engine, "agent:test", &resource, &options).expect("allow");
+        assert!(cap.is_expired());
     }
 
     #[test]

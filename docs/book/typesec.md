@@ -229,7 +229,7 @@ typed backend support:
 
 ```toml
 [dev-dependencies]
-grust-graph = { version = "0.6.0", features = ["typed-zod-rs", "sail"] }
+grust-graph = { version = "0.6.2", features = ["typed-zod-rs", "sail"] }
 ```
 
 The package is named `grust-graph`, while its library is imported as `grust`.
@@ -254,22 +254,36 @@ The central type is:
 pub struct Capability<P: Permission, R: Resource> {
     subject: String,
     resource_id: String,
+    issued_at: SystemTime,
+    expires_at: SystemTime,
+    revocation: Option<(RevocationEpoch, u64)>,
     _permission: PhantomData<fn() -> P>,
     _resource: PhantomData<fn() -> R>,
 }
 ```
 
-At runtime, the value stores the subject and resource identifier. The permission
-and resource types are represented with `PhantomData`. They cost nothing at
-runtime, but they force the compiler to distinguish a read capability from a
-write capability.
+At runtime, the value stores the subject, the resource identifier, and the
+lease: when the capability was minted, when it expires, and an optional
+revocation binding. The permission and resource types are represented with
+`PhantomData`. They cost nothing at runtime, but they force the compiler to
+distinguish a read capability from a write capability.
+
+A capability is a cached policy decision, not a permanent credential. Every
+consuming API calls `ensure_active()`, which rejects a capability that has
+outlived its lease or whose `RevocationEpoch` has been bumped since mint. The
+default lease is five minutes; `MintOptions` lets callers shorten it per risk —
+a declassification capability warrants seconds, a low-risk read can hold the
+default.
 
 The constructor is deliberately hidden:
 
 ```rust
-pub(crate) fn new_unchecked(
+pub(crate) fn new_minted(
     subject: impl Into<String>,
     resource_id: impl Into<String>,
+    issued_at: SystemTime,
+    ttl: Duration,
+    revocation: Option<RevocationEpoch>,
 ) -> Self
 ```
 
@@ -424,11 +438,38 @@ The minting flow is the core runtime bridge:
 agent.request_capability::<CanWrite, Report>(&report)
   -> engine.check(subject, "write", report.resource_id())
   -> PolicyResult::Allow
-  -> Capability::new_unchecked(subject, resource_id)
+  -> Capability::new_minted(subject, resource_id, now, ttl, revocation)
 ```
 
 The function that performs this is `mint_capability`. It emits an audit event
-for every decision and only calls the unchecked constructor after an allow.
+for every decision and only calls the hidden constructor after an allow.
+
+Two variants give callers control over the lease. `mint_capability_with` takes
+`MintOptions`, which carries the TTL and an optional `RevocationEpoch`:
+
+```rust
+let epoch = RevocationEpoch::new();
+let options = MintOptions {
+    ttl: Duration::from_secs(30),
+    revocation: Some(epoch.clone()),
+};
+let cap: Capability<CanDeclassify, CustomerRecord> =
+    mint_capability_with(&engine, subject, &customer, &options)?;
+
+// Later — policy reload, incident response, governance change:
+epoch.revoke_all();
+cap.ensure_active(); // Err(CapabilityUseError::Revoked { .. })
+```
+
+A `RevocationEpoch` is a cheap, cloneable shared counter. Capabilities record
+its value at mint; bumping it invalidates every capability minted before the
+bump, immediately, without waiting out the TTL. This closes the gap between
+"the policy changed" and "the proof stops working".
+
+`mint_capability_for_id` accepts the resource id as a plain string so async
+callers can move owned data onto a blocking thread. The minted capability is
+bound to that id exactly as in the `&R` form; every consumption site still
+compares ids at use time.
 
 ## Typestate
 
@@ -440,15 +481,29 @@ Agent<Authenticated>
 ```
 
 The state marker trait is sealed. External crates cannot add fake states. The
-only transition from unauthenticated to authenticated is through
-`authenticate`, which consumes the unauthenticated agent and returns an
-authenticated one.
+production transition from unauthenticated to authenticated is
+`authenticate_with`, which consumes the unauthenticated agent, passes the
+credentials to an `Authenticator`, and binds the agent to the *verified*
+subject the authenticator returns — never the claimed one. `JwtAuthenticator`
+in `typesec-integrations` is the reference implementation; it verifies the
+token against a JWKS endpoint and rejects credentials whose claimed subject
+does not match the token's `sub` claim.
 
-The authentication implementation is intentionally small. It checks that the
-subject and token are present. A production system would verify a JWT, API key,
-or identity-provider token. The point of this crate is not to own identity. The
-point is to make the authenticated state visible in the type system after
-identity has been established.
+For tests, demos, and deployments where identity is established out of band,
+`authenticate_unverified` trusts the claimed subject as-is and logs a warning.
+The honest name is the point: the dangerous path announces itself at every
+call site.
+
+Credentials carry their bearer secret in a `Token` newtype. `Token` redacts
+its contents from `Debug` output and implements neither `Display` nor
+`PartialEq` — printing a credentials struct cannot leak the secret into logs,
+and equality against a guessed string cannot become a brute-force oracle. The
+raw secret is read through a single explicit `expose()` call at the verifier
+boundary.
+
+The point of this crate is not to own identity. The point is to make the
+authenticated state visible in the type system after identity has been
+established.
 
 ## Combinators
 
@@ -911,8 +966,16 @@ Only `SecureAgent<Authenticated>` has:
 
 ```rust
 request_capability::<P, R>(&self, resource: &R)
+request_capability_with::<P, R>(&self, resource: &R, options: MintOptions)
 execute(&self, cap: &Capability<P, R>, resource: &R, action)
 ```
+
+`request_capability` runs the policy check on tokio's blocking thread pool.
+Policy engines may do I/O — a JWKS fetch, a WorkOS FGA call over a blocking
+HTTP client — and running them inline would stall the async executor. The
+`_with` variant plumbs `MintOptions` through, so an agent can request a
+short-lived or revocation-bound capability without dropping down to the core
+minting functions.
 
 The `execute` method captures the project's main ergonomic pattern. It takes a
 capability reference and a resource reference, logs the execution, and then runs
@@ -1401,9 +1464,29 @@ WorkOS handles enterprise identity and resource authorization, Arcade handles
 agent-oriented SaaS tool authorization, and Typesec makes the resulting local
 authority impossible to forget at the call site.
 
-Finally, the Grust crates were switched from a local path dependency to
-published crates.io packages, making the example reproducible outside this
-machine.
+The Grust crates were switched from a local path dependency to published
+crates.io packages, making the example reproducible outside this machine.
+
+A security review pass then hardened the runtime half of the system to match
+what the type-level half advertises. `SecureValue` stopped deriving `Debug`
+and `PartialEq`, so protected data cannot leak through logging or serve as an
+equality oracle. Capabilities became instance-bound at every consumption site:
+`reveal`, `declassify`, and `execute` compare the capability's resource id and
+subject against the value or agent actually in hand. The typestate transition
+gained a real trust root through the `Authenticator` trait, with the
+unverified path renamed to say what it is. The demo DID cryptography moved
+behind a `demo-crypto` feature, replaced in production by an Ed25519 key store
+with X25519 agreement and ChaCha20-Poly1305 sealing. Capabilities became
+short-lived leases.
+
+A follow-up pass finished the remaining items. Capabilities gained
+configurable TTLs through `MintOptions` and mid-lease revocation through
+`RevocationEpoch`. Bearer secrets moved into the `Token` newtype, which
+redacts itself from `Debug` the same way `SecureValue` does. The async agent
+moved policy checks onto the blocking thread pool so engines that do HTTP
+cannot stall the executor. The unmaintained `serde_yaml` dependency was
+replaced by the API-compatible `serde_norway` fork via a package rename, and
+`thiserror` moved to major version 2.
 
 # Design Tradeoffs
 
@@ -1426,11 +1509,13 @@ protected APIs require the proof
 ```
 
 Another tradeoff is that capabilities prove a decision at mint time. They now
-carry a short lease and consuming APIs reject expired capabilities, which bounds
-the stale-decision window for ordinary operations. They still do not model
-policy-version binding or distributed revocation epochs. For long-running
-agents, the next step is an epoch-bound capability that can be invalidated
-immediately when governance changes.
+carry a short lease, and capabilities minted with a `RevocationEpoch` can be
+invalidated immediately when governance changes — `revoke_all()` kills every
+outstanding proof minted before the bump. What remains unmodeled is
+*distributed* revocation: the epoch is an in-process counter, so a fleet of
+agents sharing one policy service still needs a propagation story (a
+policy-version claim, a shared epoch service, or capability re-validation
+against the engine) before revocation is truly global.
 
 The CLI is another pragmatic tradeoff. Rust code gets the strongest type-level
 story. Python code gets a subprocess oracle. That is weaker, but useful now. A
@@ -1483,9 +1568,10 @@ delegation for no matching rule or failed permission constraints. That is useful
 for composition, but applications may want clearer distinctions in logs and
 errors.
 
-Fourth, extend capability freshness from fixed leases to revocation-aware
-epochs. A capability should eventually carry a policy version or engine epoch,
-so long-running agents cannot keep using a proof after governance has changed.
+Fourth, extend revocation from in-process epochs to distributed ones.
+`RevocationEpoch` now invalidates live capabilities within a process; the next
+step is binding capabilities to a policy version or shared epoch service so a
+fleet of long-running agents sees a governance change at the same instant.
 
 Fifth, add `typesec check --json`. External agents need stable machine-readable
 answers:

@@ -311,7 +311,7 @@ examples/company_graph/company_graph_grust_sail.rs
 This example uses published Grust crates:
 
 ```toml
-grust-graph = { version = "0.6.0", features = ["typed-zod-rs", "sail"] }
+grust-graph = { version = "0.6.2", features = ["typed-zod-rs", "sail"] }
 ```
 
 It builds a backend-neutral property graph through the `grust` facade. If a Sail

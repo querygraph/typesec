@@ -139,13 +139,10 @@ impl<P: Permission, R: Resource> Capability<P, R> {
         P: Implies<Q>,
     {
         // The safety guarantee is maintained by the type bound: `P: Implies<Q>`
-        // ensures Q is strictly ≤ P in the lattice. The issue time is preserved
-        // so a derived capability is never "fresher" than its source.
-        Capability::new_with_issued_at(
-            self.subject().to_owned(),
-            self.resource_id().to_owned(),
-            self.issued_at(),
-        )
+        // ensures Q is strictly ≤ P in the lattice. The full lease (issue time,
+        // expiry, revocation binding) is preserved so a derived capability is
+        // never fresher or longer-lived than its source.
+        self.derive()
     }
 }
 

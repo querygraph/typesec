@@ -235,11 +235,11 @@ impl Authenticator for JwtAuthenticator {
     /// claim — a caller cannot authenticate as someone else's identity by
     /// pairing a valid token with a different claimed subject.
     fn verify_credentials(&self, credentials: &Credentials) -> Result<String, AgentError> {
-        let verified = self
-            .verify(&credentials.token)
-            .map_err(|e| AgentError::AuthFailed {
-                reason: format!("jwt verification failed: {e}"),
-            })?;
+        let verified =
+            self.verify(credentials.token.expose())
+                .map_err(|e| AgentError::AuthFailed {
+                    reason: format!("jwt verification failed: {e}"),
+                })?;
         if !credentials.subject.is_empty() && credentials.subject != verified.subject {
             return Err(AgentError::AuthFailed {
                 reason: format!(

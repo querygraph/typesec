@@ -5,7 +5,7 @@ use std::sync::Arc;
 use tracing::{debug, info};
 use typesec_core::{
     Capability, Permission, Resource,
-    policy::{CapabilityError, PolicyEngine, mint_capability},
+    policy::{CapabilityError, MintOptions, PolicyEngine, mint_capability_for_id},
     typestate::{Agent, AgentError, AgentState, Authenticated, Credentials, Unauthenticated},
 };
 
@@ -78,19 +78,46 @@ impl SecureAgent<Authenticated> {
     ///
     /// The capability is a zero-sized proof token — holding it means the policy
     /// engine approved the request at the time of this call.
+    /// The policy check runs on tokio's blocking thread pool: engines may do
+    /// I/O (JWKS fetches, WorkOS FGA calls over a blocking HTTP client), and
+    /// running them inline would stall the async executor.
     pub async fn request_capability<P: Permission, R: Resource>(
         &self,
         resource: &R,
     ) -> Result<Capability<P, R>, CapabilityError> {
-        let subject = self.subject();
+        self.request_capability_with(resource, MintOptions::default())
+            .await
+    }
+
+    /// Like [`request_capability`][Self::request_capability], but with explicit
+    /// lease parameters: a custom TTL and/or a
+    /// [`RevocationEpoch`][typesec_core::RevocationEpoch] binding so the
+    /// capability can be invalidated mid-lease (e.g. on policy reload).
+    pub async fn request_capability_with<P: Permission, R: Resource>(
+        &self,
+        resource: &R,
+        options: MintOptions,
+    ) -> Result<Capability<P, R>, CapabilityError> {
+        let subject = self.subject().to_owned();
         let action = P::name();
-        let resource_id = resource.resource_id();
+        let resource_id = resource.resource_id().to_owned();
+        let engine = self.inner.engine().clone();
 
-        debug!(subject, action, resource_id, "requesting capability");
+        debug!(%subject, action, %resource_id, "requesting capability");
 
-        let cap = mint_capability::<P, R>(self.inner.engine().as_ref(), subject, resource)?;
+        let cap = {
+            let subject = subject.clone();
+            let resource_id = resource_id.clone();
+            tokio::task::spawn_blocking(move || {
+                mint_capability_for_id::<P, R>(engine.as_ref(), &subject, &resource_id, &options)
+            })
+            .await
+            .map_err(|join_err| {
+                CapabilityError::EngineError(format!("policy check task failed: {join_err}"))
+            })??
+        };
 
-        info!(subject, action, resource_id, "capability granted");
+        info!(%subject, action, %resource_id, "capability granted");
 
         Ok(cap)
     }

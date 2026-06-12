@@ -50,7 +50,7 @@ pub mod secure_value;
 pub mod typestate;
 
 // Re-export the most important types at crate root.
-pub use capability::{Capability, CapabilityUseError, DEFAULT_CAPABILITY_TTL};
+pub use capability::{Capability, CapabilityUseError, DEFAULT_CAPABILITY_TTL, RevocationEpoch};
 pub use combinator::{CombineStrategy, ComposedEngine, PolicyEngineBuilder};
 pub use lattice::{Implies, LatticeEngine};
 pub use permissions::{
@@ -58,8 +58,9 @@ pub use permissions::{
     CanRead, CanReadSensitive, CanWrite, CanWriteSensitive, Permission,
 };
 pub use policy::{
-    AuditEvent, AuditSink, FallbackEngine, PolicyEngine, PolicyResult, TracingAuditSink,
-    mint_capability, set_audit_sink,
+    AuditEvent, AuditSink, FallbackEngine, MintOptions, PolicyEngine, PolicyResult,
+    TracingAuditSink, mint_capability, mint_capability_for_id, mint_capability_with,
+    set_audit_sink,
 };
 pub use resource::Resource;
 pub use role::Role;
@@ -67,5 +68,5 @@ pub use secure_value::{
     Internal, Join, PrivacyLevel, Public, Secret, SecureAccessError, SecureValue, Sensitive,
 };
 pub use typestate::{
-    Agent, AgentState, Authenticated, Authenticator, Credentials, Unauthenticated,
+    Agent, AgentState, Authenticated, Authenticator, Credentials, Token, Unauthenticated,
 };

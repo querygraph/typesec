@@ -139,9 +139,13 @@ let agent = SecureAgent::new(Arc::new(rbac_engine));
 //    subject; authenticate_unverified() exists for tests and demos.
 let agent = agent.authenticate_with(Credentials::new("agent:bot", token), &jwt_auth)?;
 
-// 3. Request a capability. Policy checked; cap minted on Allow.
+// 3. Request a capability. Policy checked; cap minted on Allow. The check
+//    runs on the blocking pool so engine I/O can't stall the executor.
 let cap: Capability<CanRead, Report> = agent.request_capability(&report).await?;
 // Capabilities are short-lived leases; protected APIs reject expired caps.
+// request_capability_with(MintOptions { ttl, revocation }) shortens the
+// lease per risk or binds the cap to a RevocationEpoch, which revoke_all()
+// can invalidate mid-lease (e.g. on policy reload).
 
 // 4. Execute. The cap is compile-time proof of permission kind; at runtime
 //    it must also match this agent's subject and this exact resource id.

@@ -26,7 +26,9 @@ futures = "0.3"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
-serde_yaml = "0.9"
+# serde_yaml 0.9 is archived/unmaintained; serde_norway is the maintained,
+# API-compatible fork. The package rename keeps `serde_yaml::` paths working.
+serde_yaml = { package = "serde_norway", version = "0.9" }
 serde_json = "1"
 garde = { version = "0.23.0", features = ["derive"] }
 
@@ -41,7 +43,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 
 # Error handling
-thiserror = "1"
+thiserror = "2"
 anyhow = "1"
 pyo3 = "0.25"
 jsonwebtoken = "9"
@@ -61,7 +63,7 @@ x25519-dalek = { version = "2", features = ["static_secrets"] }
 chacha20poly1305 = "0.10"
 sha2 = "0.10"
 getrandom = "0.2"
-grust-graph = { version = "0.6.0", path = "../grust/crates/grust", features = ["typed-zod-rs"] }
+grust-graph = { version = "0.6.2", path = "../grust/crates/grust", features = ["typed-zod-rs"] }
 
 [profile.release]
 lto = true

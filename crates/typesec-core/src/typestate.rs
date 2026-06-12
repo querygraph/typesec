@@ -45,18 +45,59 @@ impl private::Sealed for Authenticated {}
 impl AgentState for Unauthenticated {}
 impl AgentState for Authenticated {}
 
+/// A bearer secret (API key, signed JWT, etc.) that must not leak into logs.
+///
+/// Like [`SecureValue`][crate::SecureValue], `Token` redacts its contents from
+/// `Debug` output and implements neither `Display` nor `PartialEq` — equality
+/// against a guessed string would be a brute-force oracle, and verifiers should
+/// check tokens cryptographically, not by comparison. Use
+/// [`expose`][Self::expose] at the single point where the raw secret is handed
+/// to a verifier.
+#[derive(Clone)]
+pub struct Token(String);
+
+impl Token {
+    /// Wrap a raw secret string.
+    pub fn new(secret: impl Into<String>) -> Self {
+        Self(secret.into())
+    }
+
+    /// The raw secret, for handing to a credential verifier.
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+
+    /// Whether the token is empty (no secret was supplied).
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl<S: Into<String>> From<S> for Token {
+    fn from(secret: S) -> Self {
+        Self::new(secret)
+    }
+}
+
+impl std::fmt::Debug for Token {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Token(<redacted>)")
+    }
+}
+
 /// Credentials used to authenticate an agent.
 #[derive(Debug, Clone)]
 pub struct Credentials {
     /// The agent's claimed identity.
     pub subject: String,
-    /// An opaque token (API key, signed JWT, etc.) — validation is application-specific.
-    pub token: String,
+    /// An opaque bearer secret — validation is application-specific. Redacted
+    /// from `Debug` output; call [`Token::expose`] to read it.
+    pub token: Token,
 }
 
 impl Credentials {
     /// Create credentials with the given subject and token.
-    pub fn new(subject: impl Into<String>, token: impl Into<String>) -> Self {
+    pub fn new(subject: impl Into<String>, token: impl Into<Token>) -> Self {
         Self {
             subject: subject.into(),
             token: token.into(),
@@ -226,6 +267,14 @@ mod tests {
     }
 
     #[test]
+    fn credentials_debug_redacts_token() {
+        let creds = Credentials::new("agent:test", "super-secret-bearer");
+        let rendered = format!("{creds:?}");
+        assert!(!rendered.contains("super-secret-bearer"));
+        assert!(rendered.contains("<redacted>"));
+    }
+
+    #[test]
     fn empty_subject_fails_auth() {
         let agent = Agent::<Unauthenticated>::new(Arc::new(AllowAll));
         let creds = Credentials::new("", "token");
@@ -238,7 +287,7 @@ mod tests {
     struct FixedSubject(&'static str);
     impl Authenticator for FixedSubject {
         fn verify_credentials(&self, credentials: &Credentials) -> Result<String, AgentError> {
-            if credentials.token == "valid-token" {
+            if credentials.token.expose() == "valid-token" {
                 Ok(self.0.to_owned())
             } else {
                 Err(AgentError::AuthFailed {
