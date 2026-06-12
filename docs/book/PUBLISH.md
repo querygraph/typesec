@@ -236,6 +236,15 @@ This produces a regular EPUB file at:
 That is intentional: the destination should preserve the versioned filename,
 not the symlink relationship.
 
+Do not treat iCloud delivery as a broad directory-access task. On this Mac,
+listing `~/icloud/books` can fail with `Operation not permitted` even when a
+direct probe or copy to the exact destination file works. Derive the current
+filename from `docs/book/dist/VERSION.md`, then use exact-path `stat`, `cmp`,
+or `cp` against `~/icloud/books/<kindle_link>`. If Codex is running in a
+workspace sandbox, the exact `cp` may still require an approved/escalated
+command because `~/icloud/books` is outside the repository writable root; ask
+only for that specific write, not for a general iCloud browsing permission.
+
 Direct CLI mail to Send to Kindle has been less reliable than artifact delivery
 and queue inspection. If email delivery is requested, do not trust command
 success alone; report sender identity plus queue/delivery state.
