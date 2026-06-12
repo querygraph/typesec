@@ -13,6 +13,18 @@
 - Keep changelog entries concise and outcome-focused. Mention verification or
   publishing only when it is part of the delivered behavior.
 
+## Prompt-Boundary Commits
+
+- Before starting work requested by a new user prompt, conclude any finished
+  unit of work already in the working tree: add or update its `CHANGELOG.md`
+  entry, verify the relevant checks, and commit it separately.
+- Keep commits separated by logical unit of work. Do not mix a previous
+  completed change with newly requested work just because both are present in
+  the same working tree.
+- If a new prompt arrives while a previous unit is still in progress, first
+  bring that unit to a clean stopping point and commit it when it is complete;
+  then begin the new prompt as its own change with its own changelog entry.
+
 ## Auxiliary Artifacts
 
 - Ignore auxiliary artifacts created while testing, rendering, inspecting, or

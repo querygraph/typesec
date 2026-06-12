@@ -7,6 +7,8 @@ by release version, then by the date the logical change landed.
 
 ### 2026-06-12
 
+- Added repository guidance requiring completed units of work to be
+  changelogged and committed separately before starting work from a new prompt.
 - Implemented TypeDID agent communications with DID-wrapped send and
   request/reply modes, secure profile negotiation, A2A/ACP/BAND/HTTPS
   adapters, examples, tests, and documentation.
