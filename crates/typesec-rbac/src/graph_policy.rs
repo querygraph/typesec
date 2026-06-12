@@ -208,11 +208,11 @@ struct HasRoleEdge {
 impl TypedEdge for HasRoleEdge {
     const LABEL: &'static str = "HAS_ROLE";
 
-    fn from_node_id(&self) -> NodeId {
+    fn source_node_id(&self) -> NodeId {
         self.from.clone().into()
     }
 
-    fn to_node_id(&self) -> NodeId {
+    fn target_node_id(&self) -> NodeId {
         self.to.clone().into()
     }
 }
@@ -229,11 +229,11 @@ struct ReportsToEdge {
 impl TypedEdge for ReportsToEdge {
     const LABEL: &'static str = "REPORTS_TO";
 
-    fn from_node_id(&self) -> NodeId {
+    fn source_node_id(&self) -> NodeId {
         self.from.clone().into()
     }
 
-    fn to_node_id(&self) -> NodeId {
+    fn target_node_id(&self) -> NodeId {
         self.to.clone().into()
     }
 }

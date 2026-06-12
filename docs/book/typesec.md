@@ -224,12 +224,12 @@ grust = { path = "../../../grust/crates/grust", features = ["sail"] }
 ```
 
 After the Grust crates were published, the dependency was moved to the
-published facade crate. The current examples use Grust 0.5 typed graph and
+published facade crate. The current examples use Grust 0.6 typed graph and
 typed backend support:
 
 ```toml
 [dev-dependencies]
-grust-graph = { version = "0.5.0", features = ["typed-zod-rs", "sail"] }
+grust-graph = { version = "0.6.0", features = ["typed-zod-rs", "sail"] }
 ```
 
 The package is named `grust-graph`, while its library is imported as `grust`.
