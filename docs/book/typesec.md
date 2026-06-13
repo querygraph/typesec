@@ -473,10 +473,13 @@ its value at mint; bumping it invalidates every capability minted before the
 bump, immediately, without waiting out the TTL. This closes the gap between
 "the policy changed" and "the proof stops working".
 
-`mint_capability_for_id` accepts the resource id as a plain string so async
-callers can move owned data onto a blocking thread. The minted capability is
-bound to that id exactly as in the `&R` form; every consumption site still
-compares ids at use time.
+`mint_capability_for_id` accepts the resource id as a plain string for callers
+that already have a stable identifier. Async variants
+(`mint_capability_async`, `mint_capability_with_async`, and
+`mint_capability_for_id_async`) call the async policy surface and then record
+through the async audit sink path. The minted capability is bound to that id
+exactly as in the `&R` form; every consumption site still compares ids at use
+time.
 
 ## Typestate
 
@@ -977,12 +980,12 @@ request_capability_with::<P, R>(&self, resource: &R, options: MintOptions)
 execute(&self, cap: &Capability<P, R>, resource: &R, action)
 ```
 
-`request_capability` runs the policy check on tokio's blocking thread pool.
-Policy engines may do I/O — a JWKS fetch, a WorkOS FGA call over a blocking
-HTTP client — and running them inline would stall the async executor. The
-`_with` variant plumbs `MintOptions` through, so an agent can request a
-short-lived or revocation-bound capability without dropping down to the core
-minting functions.
+`request_capability` awaits the async policy surface exposed by
+`typesec-core`. Synchronous engines use the default async adapter, while
+I/O-bound engines can override the async methods and avoid blocking the
+executor. The `_with` variant plumbs `MintOptions` through, so an agent can
+request a short-lived or revocation-bound capability without dropping down to
+the core minting functions.
 
 The `execute` method captures the project's main ergonomic pattern. It takes a
 capability reference and a resource reference, logs the execution, and then runs
@@ -1510,9 +1513,10 @@ A follow-up pass finished the remaining items. Capabilities gained
 configurable TTLs through `MintOptions` and mid-lease revocation through
 `RevocationEpoch`. Bearer secrets moved into the `Token` newtype, which
 redacts itself from `Debug` the same way `SecureValue` does. The async agent
-moved policy checks onto the blocking thread pool so engines that do HTTP
-cannot stall the executor. The unmaintained `serde_yaml` dependency was
-replaced by the API-compatible `serde_norway` fork via a package rename, and
+now awaits the async policy surface; synchronous engines keep the default
+adapter, and I/O-bound engines can override it to avoid blocking the executor.
+The unmaintained `serde_yaml` dependency was replaced by the API-compatible
+`serde_norway` fork via a package rename, and
 `thiserror` moved to major version 2.
 
 # Design Tradeoffs

@@ -12,7 +12,7 @@ This note reviews the first Claude draft and records the next useful upgrades.
 - Added `typesec check --json` so Python and shell agents can consume a stable machine-readable decision without parsing human output.
 - Added in-process revocation epochs and configurable capability TTLs: `MintOptions { ttl, revocation }`, `mint_capability_with`, `mint_capability_for_id`, and `RevocationEpoch::revoke_all()` invalidating live capabilities mid-lease.
 - Moved bearer secrets into the redacting `Token` newtype (`Debug` prints `Token(<redacted>)`; no `Display`/`PartialEq`), read only via `expose()` at the verifier.
-- Made `SecureAgent::request_capability` run policy checks via `spawn_blocking` so engines doing HTTP (JWKS, WorkOS FGA) cannot stall the async executor.
+- Added async policy and audit paths so `SecureAgent::request_capability` can await native async engines directly while sync engines keep a default adapter.
 - Replaced archived `serde_yaml` with the API-compatible `serde_norway` fork via package rename; bumped `thiserror` to 2.
 
 ## Design Gaps To Close Next

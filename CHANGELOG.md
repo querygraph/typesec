@@ -13,6 +13,9 @@ by release version, then by the date the logical change landed.
 - Added forward-compatible public policy enums and structured delegation
   reasons so CLI, Python, audit, and composed-engine output can report which
   engine abstained and why.
+- Added async policy and audit surfaces plus async capability-minting helpers;
+  `SecureAgent::request_capability` now awaits that path directly instead of
+  dispatching every policy check through Tokio's blocking pool.
 - Hardened runtime security internals with typed UTC audit timestamps,
   source-preserving engine errors, zeroizing bearer tokens and credentials, and
   Python free-function documentation that steers repeated checks to

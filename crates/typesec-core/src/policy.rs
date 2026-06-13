@@ -26,6 +26,8 @@
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::{Arc, OnceLock, RwLock};
 use std::time::{Duration, SystemTime};
 
@@ -34,6 +36,12 @@ use tracing::{info, warn};
 
 use crate::capability::{DEFAULT_CAPABILITY_TTL, RevocationEpoch};
 use crate::{Capability, Permission, Resource};
+
+/// Boxed async policy-decision future.
+pub type PolicyFuture<'a> = Pin<Box<dyn Future<Output = PolicyResult> + Send + 'a>>;
+
+/// Boxed async audit-recording future.
+pub type AuditFuture<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
 
 /// The verdict returned by a policy engine.
 #[must_use = "policy decisions must be checked; an ignored result is a silent allow/deny"]
@@ -247,6 +255,17 @@ impl AuditEvent {
 pub trait AuditSink: Send + Sync {
     /// Record one policy decision.
     fn record(&self, event: &AuditEvent);
+
+    /// Record one policy decision asynchronously.
+    ///
+    /// The default implementation delegates to [`record`][Self::record], so
+    /// existing synchronous sinks remain valid. Durable sinks that write to an
+    /// async database, queue, or HTTP client can override this method.
+    fn record_async<'a>(&'a self, event: &'a AuditEvent) -> AuditFuture<'a> {
+        Box::pin(async move {
+            self.record(event);
+        })
+    }
 }
 
 /// Default [`AuditSink`] that emits events via `tracing::info!`.
@@ -283,6 +302,18 @@ pub(crate) fn record_audit(event: &AuditEvent) {
     guard.record(event);
 }
 
+/// Record an event asynchronously through the configured audit sink.
+pub(crate) async fn record_audit_async(event: &AuditEvent) {
+    let sink = {
+        let guard = audit_sink_cell().read().unwrap_or_else(|poisoned| {
+            warn!("audit sink lock was poisoned; recovering inner sink");
+            poisoned.into_inner()
+        });
+        Arc::clone(&guard)
+    };
+    sink.record_async(event).await;
+}
+
 /// The core runtime policy interface.
 ///
 /// Implementors (e.g., `RbacEngine`, `OdrlEngine`) evaluate a
@@ -306,6 +337,21 @@ pub trait PolicyEngine: Send + Sync {
     /// * `resource` — resource identifier, e.g., `"reports/q1"`.
     fn check(&self, subject: &str, action: &str, resource: &str) -> PolicyResult;
 
+    /// Evaluate whether `subject` may perform `action` on `resource`
+    /// asynchronously.
+    ///
+    /// The default implementation calls the synchronous [`check`][Self::check]
+    /// method. IO-bound engines can override this method to avoid blocking an
+    /// async executor.
+    fn check_async<'a>(
+        &'a self,
+        subject: &'a str,
+        action: &'a str,
+        resource: &'a str,
+    ) -> PolicyFuture<'a> {
+        Box::pin(async move { self.check(subject, action, resource) })
+    }
+
     /// Evaluate a request with runtime context.
     ///
     /// Engines that do not use contextual constraints can rely on this default.
@@ -319,6 +365,21 @@ pub trait PolicyEngine: Send + Sync {
         self.check(subject, action, resource)
     }
 
+    /// Evaluate a request with runtime context asynchronously.
+    ///
+    /// The default implementation calls the synchronous
+    /// [`check_with_context`][Self::check_with_context] method. Context-aware
+    /// IO-bound engines can override this method directly.
+    fn check_with_context_async<'a>(
+        &'a self,
+        subject: &'a str,
+        action: &'a str,
+        resource: &'a str,
+        ctx: &'a RequestContext,
+    ) -> PolicyFuture<'a> {
+        Box::pin(async move { self.check_with_context(subject, action, resource, ctx) })
+    }
+
     /// Compose this engine with a fallback.
     ///
     /// If this engine returns [`PolicyResult::Delegate`], the fallback is tried.
@@ -330,6 +391,52 @@ pub trait PolicyEngine: Send + Sync {
             primary: self,
             fallback,
         }
+    }
+}
+
+/// Async companion interface for policy engines.
+///
+/// Every [`PolicyEngine`] implements this trait through a blanket
+/// implementation. It is useful for generic code that wants to name the async
+/// policy surface explicitly.
+pub trait AsyncPolicyEngine: Send + Sync {
+    /// Evaluate whether `subject` may perform `action` on `resource`
+    /// asynchronously.
+    fn check_async<'a>(
+        &'a self,
+        subject: &'a str,
+        action: &'a str,
+        resource: &'a str,
+    ) -> PolicyFuture<'a>;
+
+    /// Evaluate a request with runtime context asynchronously.
+    fn check_with_context_async<'a>(
+        &'a self,
+        subject: &'a str,
+        action: &'a str,
+        resource: &'a str,
+        ctx: &'a RequestContext,
+    ) -> PolicyFuture<'a>;
+}
+
+impl<T: PolicyEngine + ?Sized> AsyncPolicyEngine for T {
+    fn check_async<'a>(
+        &'a self,
+        subject: &'a str,
+        action: &'a str,
+        resource: &'a str,
+    ) -> PolicyFuture<'a> {
+        PolicyEngine::check_async(self, subject, action, resource)
+    }
+
+    fn check_with_context_async<'a>(
+        &'a self,
+        subject: &'a str,
+        action: &'a str,
+        resource: &'a str,
+        ctx: &'a RequestContext,
+    ) -> PolicyFuture<'a> {
+        PolicyEngine::check_with_context_async(self, subject, action, resource, ctx)
     }
 }
 
@@ -359,6 +466,17 @@ pub fn mint_capability<P: Permission, R: Resource>(
         resource.resource_id(),
         &MintOptions::default(),
     )
+}
+
+/// Async variant of [`mint_capability`].
+#[must_use = "capability minting can fail and the returned proof should be used"]
+pub async fn mint_capability_async<P: Permission, R: Resource>(
+    engine: &dyn PolicyEngine,
+    subject: &str,
+    resource: &R,
+) -> Result<Capability<P, R>, CapabilityError> {
+    let resource_id = resource.resource_id().to_owned();
+    mint_capability_for_id_async(engine, subject, &resource_id, &MintOptions::default()).await
 }
 
 /// Lease parameters for capability minting.
@@ -400,11 +518,21 @@ pub fn mint_capability_with<P: Permission, R: Resource>(
     mint_capability_for_id(engine, subject, resource.resource_id(), options)
 }
 
+/// Async variant of [`mint_capability_with`].
+#[must_use = "capability minting can fail and the returned proof should be used"]
+pub async fn mint_capability_with_async<P: Permission, R: Resource>(
+    engine: &dyn PolicyEngine,
+    subject: &str,
+    resource: &R,
+    options: &MintOptions,
+) -> Result<Capability<P, R>, CapabilityError> {
+    let resource_id = resource.resource_id().to_owned();
+    mint_capability_for_id_async(engine, subject, &resource_id, options).await
+}
+
 /// Mint a capability for a resource identified only by its id string.
 ///
-/// This exists so async callers can move owned strings onto a blocking thread
-/// (the policy check may do I/O — see `SecureAgent::request_capability`)
-/// without needing `R: Send` or a reference that outlives the spawn. The
+/// This exists for callers that only have a stable resource identifier. The
 /// resulting capability is bound to `resource_id` exactly as if the `&R` form
 /// had been used: every consumption site (`execute`, `reveal`, `declassify`)
 /// still compares ids at use time, so naming a mismatched `R` type buys an
@@ -429,6 +557,42 @@ pub fn mint_capability_for_id<P: Permission, R: Resource>(
         timestamp: now_utc(),
     };
     record_audit(&event);
+
+    match result {
+        PolicyResult::Allow => Ok(Capability::new_minted(
+            subject,
+            resource_id,
+            SystemTime::now(),
+            options.ttl,
+            options.revocation.clone(),
+        )),
+        PolicyResult::Deny(reason) => Err(CapabilityError::Denied { reason }),
+        PolicyResult::Delegate(_) => Err(CapabilityError::UnhandledDelegation),
+    }
+}
+
+/// Async variant of [`mint_capability_for_id`].
+#[must_use = "capability minting can fail and the returned proof should be used"]
+pub async fn mint_capability_for_id_async<P: Permission, R: Resource>(
+    engine: &dyn PolicyEngine,
+    subject: &str,
+    resource_id: &str,
+    options: &MintOptions,
+) -> Result<Capability<P, R>, CapabilityError> {
+    let action = P::name();
+
+    let result = engine
+        .check_with_context_async(subject, action, resource_id, &options.context)
+        .await;
+
+    let event = AuditEvent {
+        subject: subject.to_owned(),
+        action: action.to_owned(),
+        resource: resource_id.to_owned(),
+        result: result.clone(),
+        timestamp: now_utc(),
+    };
+    record_audit_async(&event).await;
 
     match result {
         PolicyResult::Allow => Ok(Capability::new_minted(
@@ -475,6 +639,29 @@ impl<P: PolicyEngine> PolicyEngine for FallbackEngine<P> {
             other => other,
         }
     }
+
+    fn check_with_context_async<'a>(
+        &'a self,
+        subject: &'a str,
+        action: &'a str,
+        resource: &'a str,
+        ctx: &'a RequestContext,
+    ) -> PolicyFuture<'a> {
+        Box::pin(async move {
+            match self
+                .primary
+                .check_with_context_async(subject, action, resource, ctx)
+                .await
+            {
+                PolicyResult::Delegate(_) => {
+                    self.fallback
+                        .check_with_context_async(subject, action, resource, ctx)
+                        .await
+                }
+                other => other,
+            }
+        })
+    }
 }
 
 fn now_utc() -> AuditTimestamp {
@@ -500,6 +687,23 @@ mod tests {
         }
     }
 
+    struct AsyncAllowOnly;
+    impl PolicyEngine for AsyncAllowOnly {
+        fn check(&self, _: &str, _: &str, _: &str) -> PolicyResult {
+            PolicyResult::Deny("sync path should not be used".into())
+        }
+
+        fn check_with_context_async<'a>(
+            &'a self,
+            _: &'a str,
+            _: &'a str,
+            _: &'a str,
+            _: &'a RequestContext,
+        ) -> PolicyFuture<'a> {
+            Box::pin(async { PolicyResult::Allow })
+        }
+    }
+
     #[test]
     fn allow_all_mints_capability() {
         let engine = AllowAll;
@@ -516,6 +720,60 @@ mod tests {
         let result: Result<Capability<CanRead, GenericResource>, _> =
             mint_capability(&engine, "agent:test", &resource);
         assert!(matches!(result, Err(CapabilityError::Denied { .. })));
+    }
+
+    #[test]
+    fn async_mint_uses_async_policy_path() {
+        let engine = AsyncAllowOnly;
+        let resource = GenericResource::new("reports/q1", "report");
+
+        let sync_result: Result<Capability<CanRead, GenericResource>, _> =
+            mint_capability(&engine, "agent:test", &resource);
+        assert!(matches!(sync_result, Err(CapabilityError::Denied { .. })));
+
+        let async_result: Result<Capability<CanRead, GenericResource>, _> =
+            futures::executor::block_on(mint_capability_async(&engine, "agent:test", &resource));
+        let cap = async_result.expect("async policy path should allow");
+        assert_eq!(cap.subject(), "agent:test");
+        assert_eq!(cap.resource_id(), "reports/q1");
+    }
+
+    #[test]
+    fn audit_sink_can_override_async_recording() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct AsyncOnlySink {
+            sync_records: AtomicUsize,
+            async_records: AtomicUsize,
+        }
+
+        impl AuditSink for AsyncOnlySink {
+            fn record(&self, _: &AuditEvent) {
+                self.sync_records.fetch_add(1, Ordering::Relaxed);
+            }
+
+            fn record_async<'a>(&'a self, _: &'a AuditEvent) -> AuditFuture<'a> {
+                Box::pin(async move {
+                    self.async_records.fetch_add(1, Ordering::Relaxed);
+                })
+            }
+        }
+
+        let sink = AsyncOnlySink {
+            sync_records: AtomicUsize::new(0),
+            async_records: AtomicUsize::new(0),
+        };
+        let event = AuditEvent {
+            subject: "agent:test".into(),
+            action: "read".into(),
+            resource: "reports/q1".into(),
+            result: PolicyResult::Allow,
+            timestamp: now_utc(),
+        };
+
+        futures::executor::block_on(sink.record_async(&event));
+        assert_eq!(sink.sync_records.load(Ordering::Relaxed), 0);
+        assert_eq!(sink.async_records.load(Ordering::Relaxed), 1);
     }
 
     #[test]

@@ -28,7 +28,7 @@ use std::sync::Arc;
 
 use tracing::debug;
 
-use crate::policy::{PolicyEngine, PolicyResult, RequestContext};
+use crate::policy::{PolicyEngine, PolicyFuture, PolicyResult, RequestContext};
 
 // ── CombineStrategy ──────────────────────────────────────────────────────────
 
@@ -115,6 +115,31 @@ impl PolicyEngine for ComposedEngine {
             }
         }
     }
+
+    fn check_with_context_async<'a>(
+        &'a self,
+        subject: &'a str,
+        action: &'a str,
+        resource: &'a str,
+        ctx: &'a RequestContext,
+    ) -> PolicyFuture<'a> {
+        Box::pin(async move {
+            match self.strategy {
+                CombineStrategy::PriorityOrder => {
+                    priority_order_async(&self.engines, subject, action, resource, ctx).await
+                }
+                CombineStrategy::AllowIfAll => {
+                    allow_if_all_async(&self.engines, subject, action, resource, ctx).await
+                }
+                CombineStrategy::AllowIfAny => {
+                    allow_if_any_async(&self.engines, subject, action, resource, ctx).await
+                }
+                CombineStrategy::DenyOverrides => {
+                    deny_overrides_async(&self.engines, subject, action, resource, ctx).await
+                }
+            }
+        })
+    }
 }
 
 // ── Strategy implementations ─────────────────────────────────────────────────
@@ -128,6 +153,30 @@ fn priority_order(
 ) -> PolicyResult {
     for engine in engines {
         match engine.check_with_context(subject, action, resource, ctx) {
+            PolicyResult::Delegate(_) => continue,
+            result => return result,
+        }
+    }
+    PolicyResult::delegate("composed", "all engines delegated")
+}
+
+async fn priority_order_async(
+    engines: &[Arc<dyn PolicyEngine>],
+    subject: &str,
+    action: &str,
+    resource: &str,
+    ctx: &RequestContext,
+) -> PolicyResult {
+    for engine in engines {
+        match PolicyEngine::check_with_context_async(
+            engine.as_ref(),
+            subject,
+            action,
+            resource,
+            ctx,
+        )
+        .await
+        {
             PolicyResult::Delegate(_) => continue,
             result => return result,
         }
@@ -168,6 +217,45 @@ fn allow_if_all(
     }
 }
 
+async fn allow_if_all_async(
+    engines: &[Arc<dyn PolicyEngine>],
+    subject: &str,
+    action: &str,
+    resource: &str,
+    ctx: &RequestContext,
+) -> PolicyResult {
+    let mut any_definitive = false;
+    let mut deny_reasons: Vec<String> = Vec::new();
+
+    for engine in engines {
+        match PolicyEngine::check_with_context_async(
+            engine.as_ref(),
+            subject,
+            action,
+            resource,
+            ctx,
+        )
+        .await
+        {
+            PolicyResult::Allow => {
+                any_definitive = true;
+            }
+            PolicyResult::Delegate(_) => {}
+            PolicyResult::Deny(reason) => {
+                deny_reasons.push(reason);
+            }
+        }
+    }
+
+    if !deny_reasons.is_empty() {
+        PolicyResult::Deny(deny_reasons.join("; "))
+    } else if any_definitive {
+        PolicyResult::Allow
+    } else {
+        PolicyResult::delegate("composed", "all engines delegated")
+    }
+}
+
 fn allow_if_any(
     engines: &[Arc<dyn PolicyEngine>],
     subject: &str,
@@ -179,6 +267,36 @@ fn allow_if_any(
 
     for engine in engines {
         match engine.check_with_context(subject, action, resource, ctx) {
+            PolicyResult::Allow => return PolicyResult::Allow,
+            deny @ PolicyResult::Deny(_) => {
+                last_deny = Some(deny);
+            }
+            PolicyResult::Delegate(_) => {}
+        }
+    }
+
+    last_deny.unwrap_or_else(|| PolicyResult::delegate("composed", "all engines delegated"))
+}
+
+async fn allow_if_any_async(
+    engines: &[Arc<dyn PolicyEngine>],
+    subject: &str,
+    action: &str,
+    resource: &str,
+    ctx: &RequestContext,
+) -> PolicyResult {
+    let mut last_deny: Option<PolicyResult> = None;
+
+    for engine in engines {
+        match PolicyEngine::check_with_context_async(
+            engine.as_ref(),
+            subject,
+            action,
+            resource,
+            ctx,
+        )
+        .await
+        {
             PolicyResult::Allow => return PolicyResult::Allow,
             deny @ PolicyResult::Deny(_) => {
                 last_deny = Some(deny);
@@ -202,6 +320,47 @@ fn deny_overrides(
 
     for engine in engines {
         match engine.check_with_context(subject, action, resource, ctx) {
+            PolicyResult::Allow => {
+                any_allow = true;
+            }
+            PolicyResult::Deny(reason) => {
+                if first_deny.is_none() {
+                    first_deny = Some(reason);
+                }
+            }
+            PolicyResult::Delegate(_) => {}
+        }
+    }
+
+    if let Some(reason) = first_deny {
+        PolicyResult::Deny(reason)
+    } else if any_allow {
+        PolicyResult::Allow
+    } else {
+        PolicyResult::delegate("composed", "all engines delegated")
+    }
+}
+
+async fn deny_overrides_async(
+    engines: &[Arc<dyn PolicyEngine>],
+    subject: &str,
+    action: &str,
+    resource: &str,
+    ctx: &RequestContext,
+) -> PolicyResult {
+    let mut any_allow = false;
+    let mut first_deny: Option<String> = None;
+
+    for engine in engines {
+        match PolicyEngine::check_with_context_async(
+            engine.as_ref(),
+            subject,
+            action,
+            resource,
+            ctx,
+        )
+        .await
+        {
             PolicyResult::Allow => {
                 any_allow = true;
             }

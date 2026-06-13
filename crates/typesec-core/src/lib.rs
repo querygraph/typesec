@@ -58,9 +58,11 @@ pub use permissions::{
     CanRead, CanReadSensitive, CanWrite, CanWriteSensitive, Permission,
 };
 pub use policy::{
-    AuditEvent, AuditSink, AuditTimestamp, DelegationReason, FallbackEngine, MintOptions,
-    PolicyEngine, PolicyResult, RequestContext, TracingAuditSink, format_audit_timestamp,
-    mint_capability, mint_capability_for_id, mint_capability_with, set_audit_sink,
+    AsyncPolicyEngine, AuditEvent, AuditFuture, AuditSink, AuditTimestamp, DelegationReason,
+    FallbackEngine, MintOptions, PolicyEngine, PolicyFuture, PolicyResult, RequestContext,
+    TracingAuditSink, format_audit_timestamp, mint_capability, mint_capability_async,
+    mint_capability_for_id, mint_capability_for_id_async, mint_capability_with,
+    mint_capability_with_async, set_audit_sink,
 };
 pub use resource::Resource;
 pub use role::Role;

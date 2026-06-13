@@ -15,4 +15,5 @@ tracing = { workspace = true }
 zeroize = { workspace = true }
 
 [dev-dependencies]
+futures = { workspace = true }
 trybuild = "1"
