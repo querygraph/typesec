@@ -50,7 +50,10 @@ pub mod secure_value;
 pub mod typestate;
 
 // Re-export the most important types at crate root.
-pub use capability::{Capability, CapabilityUseError, DEFAULT_CAPABILITY_TTL, RevocationEpoch};
+pub use capability::{
+    Capability, CapabilityId, CapabilityRevocationList, CapabilityUseError, DEFAULT_CAPABILITY_TTL,
+    RevocationEpoch,
+};
 pub use combinator::{CombineStrategy, ComposedEngine, PolicyEngineBuilder};
 pub use lattice::{Implies, LatticeEngine};
 pub use permissions::{

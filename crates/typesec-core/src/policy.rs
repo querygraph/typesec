@@ -34,7 +34,7 @@ use std::time::{Duration, SystemTime};
 use chrono::{DateTime, SecondsFormat, Utc};
 use tracing::{info, warn};
 
-use crate::capability::{DEFAULT_CAPABILITY_TTL, RevocationEpoch};
+use crate::capability::{CapabilityRevocationList, DEFAULT_CAPABILITY_TTL, RevocationEpoch};
 use crate::{Capability, Permission, Resource};
 
 /// Boxed async policy-decision future.
@@ -493,6 +493,9 @@ pub struct MintOptions {
     /// invalidated mid-lease by calling [`RevocationEpoch::revoke_all`]
     /// (e.g. after a policy reload).
     pub revocation: Option<RevocationEpoch>,
+    /// Optional per-capability revocation list. Capabilities minted with one
+    /// can be invalidated individually via [`CapabilityRevocationList::revoke`].
+    pub revocation_list: Option<Arc<CapabilityRevocationList>>,
     /// Runtime context to pass into the policy engine while minting.
     pub context: RequestContext,
 }
@@ -502,8 +505,17 @@ impl Default for MintOptions {
         Self {
             ttl: DEFAULT_CAPABILITY_TTL,
             revocation: None,
+            revocation_list: None,
             context: RequestContext::default(),
         }
+    }
+}
+
+impl MintOptions {
+    /// Bind minted capabilities to a per-capability revocation list.
+    pub fn with_revocation_list(mut self, revocation_list: Arc<CapabilityRevocationList>) -> Self {
+        self.revocation_list = Some(revocation_list);
+        self
     }
 }
 
@@ -565,6 +577,7 @@ pub fn mint_capability_for_id<P: Permission, R: Resource>(
             SystemTime::now(),
             options.ttl,
             options.revocation.clone(),
+            options.revocation_list.clone(),
         )),
         PolicyResult::Deny(reason) => Err(CapabilityError::Denied { reason }),
         PolicyResult::Delegate(_) => Err(CapabilityError::UnhandledDelegation),
@@ -601,6 +614,7 @@ pub async fn mint_capability_for_id_async<P: Permission, R: Resource>(
             SystemTime::now(),
             options.ttl,
             options.revocation.clone(),
+            options.revocation_list.clone(),
         )),
         PolicyResult::Deny(reason) => Err(CapabilityError::Denied { reason }),
         PolicyResult::Delegate(_) => Err(CapabilityError::UnhandledDelegation),
@@ -791,6 +805,29 @@ mod tests {
         cap.ensure_active().expect("active before revocation");
         epoch.revoke_all();
         assert!(cap.ensure_active().is_err());
+    }
+
+    #[test]
+    fn mint_with_revocation_list_revokes_one_capability() {
+        let engine = AllowAll;
+        let resource = GenericResource::new("reports/q1", "report");
+        let revocation_list = Arc::new(CapabilityRevocationList::new());
+        let options = MintOptions::default().with_revocation_list(revocation_list.clone());
+
+        let first: Capability<CanRead, GenericResource> =
+            mint_capability_with(&engine, "agent:test", &resource, &options).expect("allow");
+        let second: Capability<CanRead, GenericResource> =
+            mint_capability_with(&engine, "agent:test", &resource, &options).expect("allow");
+
+        revocation_list.revoke(first.id());
+
+        assert!(matches!(
+            first.ensure_active(),
+            Err(crate::capability::CapabilityUseError::RevokedById { id }) if id == first.id()
+        ));
+        second
+            .ensure_active()
+            .expect("second capability remains active");
     }
 
     #[test]

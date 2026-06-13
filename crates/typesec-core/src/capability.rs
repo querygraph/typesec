@@ -30,9 +30,12 @@
 //! write_report(read_cap, report); // ← compile error: wrong capability type
 //! ```
 
+use std::collections::HashSet;
+use std::fmt;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{PoisonError, RwLock};
 use std::time::{Duration, SystemTime};
 
 use crate::{Permission, Resource};
@@ -46,6 +49,28 @@ use crate::{Permission, Resource};
 /// [`MintOptions`][crate::policy::MintOptions] to mint with a different TTL —
 /// e.g. seconds for `CanDeclassify`, longer for low-risk reads.
 pub const DEFAULT_CAPABILITY_TTL: Duration = Duration::from_secs(300);
+
+static NEXT_CAPABILITY_ID: AtomicU64 = AtomicU64::new(1);
+
+/// Stable identity for one minted capability within this process.
+///
+/// A `CapabilityId` names the individual proof, not merely a subject/resource
+/// pair. Revoking this id invalidates exactly the matching capability while
+/// leaving other capabilities for the same subject or resource untouched.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct CapabilityId(u64);
+
+impl CapabilityId {
+    fn next() -> Self {
+        Self(NEXT_CAPABILITY_ID.fetch_add(1, Ordering::Relaxed))
+    }
+}
+
+impl fmt::Display for CapabilityId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "cap-{}", self.0)
+    }
+}
 
 /// A shared revocation epoch for live capability invalidation.
 ///
@@ -81,6 +106,35 @@ impl RevocationEpoch {
     }
 }
 
+/// Per-capability revocation list.
+///
+/// Pair this with [`MintOptions::with_revocation_list`][crate::policy::MintOptions::with_revocation_list]
+/// when incident response needs to revoke one minted proof without bumping a
+/// shared [`RevocationEpoch`] for every holder.
+#[derive(Debug, Default)]
+pub struct CapabilityRevocationList {
+    revoked: RwLock<HashSet<CapabilityId>>,
+}
+
+impl CapabilityRevocationList {
+    /// Create an empty capability revocation list.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Revoke one minted capability id.
+    pub fn revoke(&self, id: CapabilityId) {
+        let mut revoked = self.revoked.write().unwrap_or_else(PoisonError::into_inner);
+        revoked.insert(id);
+    }
+
+    /// Whether this list contains the capability id.
+    pub fn is_revoked(&self, id: CapabilityId) -> bool {
+        let revoked = self.revoked.read().unwrap_or_else(PoisonError::into_inner);
+        revoked.contains(&id)
+    }
+}
+
 /// Error returned when a capability is no longer valid for use.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -101,6 +155,12 @@ pub enum CapabilityUseError {
         /// Epoch counter value now.
         current_epoch: u64,
     },
+    /// The capability id was revoked via a [`CapabilityRevocationList`].
+    #[error("capability revoked by id ({id})")]
+    RevokedById {
+        /// The revoked capability id.
+        id: CapabilityId,
+    },
 }
 
 /// An unforgeable proof that subject `subject` holds permission `P` on resource `R`.
@@ -108,6 +168,8 @@ pub enum CapabilityUseError {
 /// Construct via [`PolicyEngine::mint_capability`][crate::PolicyEngine].
 /// The phantom parameters `P` and `R` are erased at runtime but enforced at compile time.
 pub struct Capability<P: Permission, R: Resource> {
+    /// Unique id for this minted proof.
+    id: CapabilityId,
     /// The subject (agent identity) that was granted this capability.
     subject: String,
     /// The resource identifier (path, URI, etc.) this capability covers.
@@ -119,6 +181,8 @@ pub struct Capability<P: Permission, R: Resource> {
     /// Revocation binding: the shared epoch handle and its value at mint time.
     /// `None` for capabilities minted without a [`RevocationEpoch`].
     revocation: Option<(RevocationEpoch, u64)>,
+    /// Optional per-capability revocation list.
+    revocation_list: Option<Arc<CapabilityRevocationList>>,
     /// Zero-cost phantom binding to the permission type.
     _permission: PhantomData<fn() -> P>,
     /// Zero-cost phantom binding to the resource type.
@@ -153,6 +217,7 @@ impl<P: Permission, R: Resource> Capability<P, R> {
             issued_at,
             DEFAULT_CAPABILITY_TTL,
             None,
+            None,
         )
     }
 
@@ -163,9 +228,11 @@ impl<P: Permission, R: Resource> Capability<P, R> {
         issued_at: SystemTime,
         ttl: Duration,
         revocation: Option<RevocationEpoch>,
+        revocation_list: Option<Arc<CapabilityRevocationList>>,
     ) -> Self {
         let expires_at = issued_at.checked_add(ttl).unwrap_or(issued_at);
         Self {
+            id: CapabilityId::next(),
             subject: subject.into(),
             resource_id: resource_id.into(),
             issued_at,
@@ -174,6 +241,7 @@ impl<P: Permission, R: Resource> Capability<P, R> {
                 let minted = epoch.current();
                 (epoch, minted)
             }),
+            revocation_list,
             _permission: PhantomData,
             _resource: PhantomData,
         }
@@ -185,14 +253,21 @@ impl<P: Permission, R: Resource> Capability<P, R> {
     /// "fresher" or longer-lived than its source.
     pub(crate) fn derive<Q: Permission>(&self) -> Capability<Q, R> {
         Capability {
+            id: self.id,
             subject: self.subject.clone(),
             resource_id: self.resource_id.clone(),
             issued_at: self.issued_at,
             expires_at: self.expires_at,
             revocation: self.revocation.clone(),
+            revocation_list: self.revocation_list.clone(),
             _permission: PhantomData,
             _resource: PhantomData,
         }
+    }
+
+    /// Unique id for this minted proof.
+    pub fn id(&self) -> CapabilityId {
+        self.id
     }
 
     /// The subject that holds this capability.
@@ -242,6 +317,10 @@ impl<P: Permission, R: Resource> Capability<P, R> {
         self.revocation
             .as_ref()
             .is_some_and(|(epoch, minted)| epoch.current() > *minted)
+            || self
+                .revocation_list
+                .as_ref()
+                .is_some_and(|list| list.is_revoked(self.id))
     }
 
     /// Validate that this capability can still be used (not expired, not revoked).
@@ -262,6 +341,13 @@ impl<P: Permission, R: Resource> Capability<P, R> {
                 });
             }
         }
+        if self
+            .revocation_list
+            .as_ref()
+            .is_some_and(|list| list.is_revoked(self.id))
+        {
+            return Err(CapabilityUseError::RevokedById { id: self.id });
+        }
         Ok(())
     }
 
@@ -274,6 +360,7 @@ impl<P: Permission, R: Resource> Capability<P, R> {
 impl<P: Permission, R: Resource> std::fmt::Debug for Capability<P, R> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Capability")
+            .field("id", &self.id)
             .field("permission", &P::name())
             .field("subject", &self.subject)
             .field("resource_id", &self.resource_id)
@@ -368,6 +455,7 @@ mod tests {
             SystemTime::now(),
             DEFAULT_CAPABILITY_TTL,
             Some(epoch.clone()),
+            None,
         );
 
         cap.ensure_active().expect("active before revocation");
@@ -394,8 +482,42 @@ mod tests {
             SystemTime::now() - Duration::from_secs(2),
             Duration::from_secs(1),
             None,
+            None,
         );
         assert!(cap.is_expired());
+    }
+
+    #[test]
+    fn revocation_list_invalidates_one_capability() {
+        let list = Arc::new(CapabilityRevocationList::new());
+        let first: Capability<CanRead, TestResource> = Capability::new_minted(
+            "agent:test",
+            "test://resource",
+            SystemTime::now(),
+            DEFAULT_CAPABILITY_TTL,
+            None,
+            Some(list.clone()),
+        );
+        let second: Capability<CanRead, TestResource> = Capability::new_minted(
+            "agent:test",
+            "test://resource",
+            SystemTime::now(),
+            DEFAULT_CAPABILITY_TTL,
+            None,
+            Some(list.clone()),
+        );
+
+        list.revoke(first.id());
+
+        assert!(first.is_revoked());
+        assert!(!second.is_revoked());
+        assert!(matches!(
+            first.ensure_active(),
+            Err(CapabilityUseError::RevokedById { id }) if id == first.id()
+        ));
+        second
+            .ensure_active()
+            .expect("second capability remains active");
     }
 
     #[test]

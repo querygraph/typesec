@@ -253,28 +253,30 @@ The central type is:
 
 ```rust
 pub struct Capability<P: Permission, R: Resource> {
+    id: CapabilityId,
     subject: String,
     resource_id: String,
     issued_at: SystemTime,
     expires_at: SystemTime,
     revocation: Option<(RevocationEpoch, u64)>,
+    revocation_list: Option<Arc<CapabilityRevocationList>>,
     _permission: PhantomData<fn() -> P>,
     _resource: PhantomData<fn() -> R>,
 }
 ```
 
-At runtime, the value stores the subject, the resource identifier, and the
-lease: when the capability was minted, when it expires, and an optional
-revocation binding. The permission and resource types are represented with
-`PhantomData`. They cost nothing at runtime, but they force the compiler to
+At runtime, the value stores a unique capability id, the subject, the resource
+identifier, and the lease: when the capability was minted, when it expires, and
+optional revocation bindings. The permission and resource types are represented
+with `PhantomData`. They cost nothing at runtime, but they force the compiler to
 distinguish a read capability from a write capability.
 
 A capability is a cached policy decision, not a permanent credential. Every
 consuming API calls `ensure_active()`, which rejects a capability that has
-outlived its lease or whose `RevocationEpoch` has been bumped since mint. The
-default lease is five minutes; `MintOptions` lets callers shorten it per risk —
-a declassification capability warrants seconds, a low-risk read can hold the
-default.
+outlived its lease, whose `RevocationEpoch` has been bumped since mint, or whose
+id appears in a `CapabilityRevocationList`. The default lease is five minutes;
+`MintOptions` lets callers shorten it per risk — a declassification capability
+warrants seconds, a low-risk read can hold the default.
 
 The constructor is deliberately hidden:
 
@@ -285,6 +287,7 @@ pub(crate) fn new_minted(
     issued_at: SystemTime,
     ttl: Duration,
     revocation: Option<RevocationEpoch>,
+    revocation_list: Option<Arc<CapabilityRevocationList>>,
 ) -> Self
 ```
 
@@ -447,20 +450,22 @@ The minting flow is the core runtime bridge:
 agent.request_capability::<CanWrite, Report>(&report)
   -> engine.check(subject, "write", report.resource_id())
   -> PolicyResult::Allow
-  -> Capability::new_minted(subject, resource_id, now, ttl, revocation)
+  -> Capability::new_minted(subject, resource_id, now, ttl, revocation, revocation_list)
 ```
 
 The function that performs this is `mint_capability`. It emits an audit event
 for every decision and only calls the hidden constructor after an allow.
 
 Two variants give callers control over the lease. `mint_capability_with` takes
-`MintOptions`, which carries the TTL and an optional `RevocationEpoch`:
+`MintOptions`, which carries the TTL, an optional `RevocationEpoch`, and an
+optional `CapabilityRevocationList`:
 
 ```rust
 let epoch = RevocationEpoch::new();
 let options = MintOptions {
     ttl: Duration::from_secs(30),
     revocation: Some(epoch.clone()),
+    ..MintOptions::default()
 };
 let cap: Capability<CanDeclassify, CustomerRecord> =
     mint_capability_with(&engine, subject, &customer, &options)?;
@@ -474,6 +479,19 @@ A `RevocationEpoch` is a cheap, cloneable shared counter. Capabilities record
 its value at mint; bumping it invalidates every capability minted before the
 bump, immediately, without waiting out the TTL. This closes the gap between
 "the policy changed" and "the proof stops working".
+
+For narrower incident response, bind capabilities to a
+`CapabilityRevocationList` and revoke the id of exactly the compromised proof:
+
+```rust
+let crl = Arc::new(CapabilityRevocationList::new());
+let options = MintOptions::default().with_revocation_list(crl.clone());
+let cap: Capability<CanRead, CustomerRecord> =
+    mint_capability_with(&engine, subject, &customer, &options)?;
+
+crl.revoke(cap.id());
+cap.ensure_active(); // Err(CapabilityUseError::RevokedById { .. })
+```
 
 `mint_capability_for_id` accepts the resource id as a plain string for callers
 that already have a stable identifier. Async variants
@@ -1546,10 +1564,12 @@ protected APIs require the proof
 Another tradeoff is that capabilities prove a decision at mint time. They now
 carry a short lease, and capabilities minted with a `RevocationEpoch` can be
 invalidated immediately when governance changes — `revoke_all()` kills every
-outstanding proof minted before the bump. What remains unmodeled is
+outstanding proof minted before the bump. Capabilities can also be bound to a
+`CapabilityRevocationList` for exact single-proof revocation. What remains
+unmodeled is
 *distributed* revocation: the epoch is an in-process counter, so a fleet of
-agents sharing one policy service still needs a propagation story (a
-policy-version claim, a shared epoch service, or capability re-validation
+agents sharing one policy service still needs a propagation story (a shared CRL,
+a policy-version claim, a shared epoch service, or capability re-validation
 against the engine) before revocation is truly global.
 
 The CLI is another pragmatic tradeoff. Rust code gets the strongest type-level

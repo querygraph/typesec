@@ -10,7 +10,7 @@ This note reviews the first Claude draft and records the next useful upgrades.
 - Stabilized the audit integration test by using a global capture subscriber for the test binary instead of a racy thread-local subscriber.
 - Added Python smoke tests around `typesec check` so Python agents can exercise policy decisions without a native binding.
 - Added `typesec check --json` so Python and shell agents can consume a stable machine-readable decision without parsing human output.
-- Added in-process revocation epochs and configurable capability TTLs: `MintOptions { ttl, revocation }`, `mint_capability_with`, `mint_capability_for_id`, and `RevocationEpoch::revoke_all()` invalidating live capabilities mid-lease.
+- Added in-process revocation epochs, per-capability revocation lists, and configurable capability TTLs: `MintOptions { ttl, revocation, revocation_list }`, `mint_capability_with`, `mint_capability_for_id`, `RevocationEpoch::revoke_all()`, and `CapabilityRevocationList::revoke()` invalidating live capabilities mid-lease.
 - Moved bearer secrets into the redacting `Token` newtype (`Debug` prints `Token(<redacted>)`; no `Display`/`PartialEq`), read only via `expose()` at the verifier.
 - Added async policy and audit paths so `SecureAgent::request_capability` can await native async engines directly while sync engines keep a default adapter.
 - Replaced archived `serde_yaml` with the API-compatible `serde_norway` fork via package rename; bumped `thiserror` to 2.
@@ -20,7 +20,7 @@ This note reviews the first Claude draft and records the next useful upgrades.
 - Add compile-fail tests with `trybuild` for the central promise: unauthenticated agents cannot request capabilities, actions cannot execute without capabilities, and lower capabilities cannot coerce upward.
 - Generate typed permission/resource modules from policy files, then compile downstream examples against generated code so policy renames break at compile time.
 - Split policy `Deny`, `Delegate`, and constraint failure semantics more explicitly. Today `mint_capability` treats delegation as an error; composed deployments should make that fallback path first-class.
-- Extend revocation from in-process epochs to distributed ones. `RevocationEpoch` now invalidates live capabilities within a process; a fleet of agents still needs policy-version binding or a shared epoch service for global revocation.
+- Extend revocation from in-process epochs/lists to distributed ones. `RevocationEpoch` and `CapabilityRevocationList` now invalidate live capabilities within a process; a fleet of agents still needs policy-version binding, a shared CRL, or a shared epoch service for global revocation.
 - Add an optional PyO3 crate later if Python integrations need in-process checks, but keep the CLI boundary first because it is easy to sandbox and test.
 
 ## Python And LangChain Testing
