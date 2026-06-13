@@ -7,6 +7,8 @@ by release version, then by the date the logical change landed.
 
 - Updated the `grust-graph` dependency and user-facing Grust examples from
   `0.6.2` to `0.7.0`.
+- Rebuilt the book artifacts for `typesec (0.7.0)` and delivered the versioned
+  EPUB to iCloud Books.
 
 ## 0.7.0
 
