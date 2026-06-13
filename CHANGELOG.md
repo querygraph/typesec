@@ -12,6 +12,9 @@ by release version, then by the date the logical change landed.
   one live proof to be revoked without bumping a shared revocation epoch.
 - Added `policy!` role inheritance with `role Child extends Parent`, flattening
   inherited permissions and resource patterns during macro expansion.
+- Added DID key rotation for `Ed25519DidKeyStore`, including active key version
+  reporting, rotation-aware DID documents, in-flight verification for previous
+  keys, and retired-key rejection.
 - Added RBAC wildcard subject assignments with compiled glob validation, typed
   ODRL constraint operands, prohibition-overridden ODRL audit events, and
   snake_case role names for multiword `policy!` roles.

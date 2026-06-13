@@ -13,7 +13,7 @@
 //! [`DidKeyStore`] with JOSE/DIDComm, HPKE, or an HSM/KMS.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fmt,
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
@@ -98,6 +98,12 @@ pub struct VerificationMethod {
     pub controller: Did,
     /// Public key bytes encoded as hex for this local integration.
     pub public_key_hex: String,
+    /// Optional local key version for rotation-aware DID documents.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_version: Option<u64>,
+    /// Optional local rotation status (`active` or `previous`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_status: Option<String>,
 }
 
 impl VerificationMethod {
@@ -108,6 +114,8 @@ impl VerificationMethod {
             method_type: "TypesecDemoKey2026".to_owned(),
             controller,
             public_key_hex: hex_encode(public_key.as_ref()),
+            key_version: None,
+            key_status: None,
         }
     }
 
@@ -177,12 +185,16 @@ impl DidDocument {
                     method_type: "Ed25519VerificationKey2020".to_owned(),
                     controller: did.clone(),
                     public_key_hex: hex_encode(signing_public.as_ref()),
+                    key_version: Some(1),
+                    key_status: Some("active".to_owned()),
                 },
                 VerificationMethod {
                     id: agreement_id.clone(),
                     method_type: "X25519KeyAgreementKey2020".to_owned(),
                     controller: did,
                     public_key_hex: hex_encode(agreement_public.as_ref()),
+                    key_version: Some(1),
+                    key_status: Some("active".to_owned()),
                 },
             ],
             authentication: vec![signing_id],
@@ -212,6 +224,20 @@ impl DidDocument {
             .ok_or(DidError::MissingKeyAgreement)?;
         self.method(kid)
             .ok_or_else(|| DidError::MissingVerificationMethod(kid.clone()))
+    }
+
+    fn key_agreement_keys(&self) -> Result<Vec<&VerificationMethod>, DidError> {
+        if self.key_agreement.is_empty() {
+            return Err(DidError::MissingKeyAgreement);
+        }
+
+        self.key_agreement
+            .iter()
+            .map(|kid| {
+                self.method(kid)
+                    .ok_or_else(|| DidError::MissingVerificationMethod(kid.clone()))
+            })
+            .collect()
     }
 }
 
@@ -463,7 +489,15 @@ impl std::fmt::Debug for Ed25519DidKey {
 /// ChaCha20-Poly1305 authenticated payload encryption.
 #[derive(Debug, Default, Clone)]
 pub struct Ed25519DidKeyStore {
-    keys: HashMap<Did, Ed25519DidKey>,
+    keys: HashMap<Did, Vec<Ed25519DidKeyRecord>>,
+    retired_methods: HashSet<String>,
+}
+
+#[derive(Debug, Clone)]
+struct Ed25519DidKeyRecord {
+    version: u64,
+    key: Ed25519DidKey,
+    retired: bool,
 }
 
 impl Ed25519DidKeyStore {
@@ -474,14 +508,156 @@ impl Ed25519DidKeyStore {
 
     /// Add a key pair for a DID.
     pub fn with_key(mut self, did: Did, key: Ed25519DidKey) -> Self {
-        self.keys.insert(did, key);
+        self.keys.insert(
+            did,
+            vec![Ed25519DidKeyRecord {
+                version: 1,
+                key,
+                retired: false,
+            }],
+        );
         self
     }
 
-    fn key(&self, did: &Did) -> Result<&Ed25519DidKey, DidError> {
+    /// Rotate a DID to a new active key version.
+    ///
+    /// Existing non-retired versions remain in the DID document for in-flight
+    /// envelope verification until explicitly retired.
+    pub fn rotate_key(&mut self, did: &Did, key: Ed25519DidKey) -> Result<u64, DidError> {
+        let records = self
+            .keys
+            .get_mut(did)
+            .ok_or_else(|| DidError::MissingPrivateKey(did.to_string()))?;
+        let next_version = records
+            .iter()
+            .map(|record| record.version)
+            .max()
+            .unwrap_or(0)
+            + 1;
+        records.push(Ed25519DidKeyRecord {
+            version: next_version,
+            key,
+            retired: false,
+        });
+        Ok(next_version)
+    }
+
+    /// Retire an old key version.
+    ///
+    /// Retired authentication methods are omitted from newly generated DID
+    /// documents and are rejected by this store's verifier.
+    pub fn retire_key(&mut self, did: &Did, version: u64) -> Result<(), DidError> {
+        if self.active_key_version(did)? == version {
+            return Err(DidError::CannotRetireActiveKey {
+                did: did.to_string(),
+                version,
+            });
+        }
+
+        let records = self
+            .keys
+            .get_mut(did)
+            .ok_or_else(|| DidError::MissingPrivateKey(did.to_string()))?;
+        let record = records
+            .iter_mut()
+            .find(|record| record.version == version)
+            .ok_or_else(|| DidError::MissingKeyVersion {
+                did: did.to_string(),
+                version,
+            })?;
+        record.retired = true;
+        self.retired_methods
+            .insert(Self::signing_method_id(did, version));
+        self.retired_methods
+            .insert(Self::agreement_method_id(did, version));
+        Ok(())
+    }
+
+    /// Active signing/encryption version for `did`.
+    pub fn active_key_version(&self, did: &Did) -> Result<u64, DidError> {
+        Ok(self.active_record(did)?.version)
+    }
+
+    /// Build a rotation-aware DID document for one local DID.
+    pub fn document(&self, did: &Did) -> Result<DidDocument, DidError> {
+        let records = self
+            .keys
+            .get(did)
+            .ok_or_else(|| DidError::MissingPrivateKey(did.to_string()))?;
+        let active_version = self.active_key_version(did)?;
+        let mut verification_method = Vec::new();
+        let mut authentication = Vec::new();
+        let mut key_agreement = Vec::new();
+
+        for record in records.iter().filter(|record| !record.retired) {
+            let status = if record.version == active_version {
+                "active"
+            } else {
+                "previous"
+            };
+            let signing_id = Self::signing_method_id(did, record.version);
+            let agreement_id = Self::agreement_method_id(did, record.version);
+            verification_method.push(VerificationMethod {
+                id: signing_id.clone(),
+                method_type: "Ed25519VerificationKey2020".to_owned(),
+                controller: did.clone(),
+                public_key_hex: hex_encode(&record.key.signing_public()),
+                key_version: Some(record.version),
+                key_status: Some(status.to_owned()),
+            });
+            verification_method.push(VerificationMethod {
+                id: agreement_id.clone(),
+                method_type: "X25519KeyAgreementKey2020".to_owned(),
+                controller: did.clone(),
+                public_key_hex: hex_encode(&record.key.agreement_public()),
+                key_version: Some(record.version),
+                key_status: Some(status.to_owned()),
+            });
+
+            if record.version == active_version {
+                authentication.insert(0, signing_id);
+                key_agreement.insert(0, agreement_id);
+            } else {
+                authentication.push(signing_id);
+                key_agreement.push(agreement_id);
+            }
+        }
+
+        Ok(DidDocument {
+            id: did.clone(),
+            verification_method,
+            authentication,
+            key_agreement,
+            service: Vec::new(),
+        })
+    }
+
+    fn active_record(&self, did: &Did) -> Result<&Ed25519DidKeyRecord, DidError> {
         self.keys
             .get(did)
+            .and_then(|records| {
+                records
+                    .iter()
+                    .filter(|record| !record.retired)
+                    .max_by_key(|record| record.version)
+            })
             .ok_or_else(|| DidError::MissingPrivateKey(did.to_string()))
+    }
+
+    fn signing_method_id(did: &Did, version: u64) -> String {
+        if version == 1 {
+            format!("{did}#key-1")
+        } else {
+            format!("{did}#key-signing-v{version}")
+        }
+    }
+
+    fn agreement_method_id(did: &Did, version: u64) -> String {
+        if version == 1 {
+            format!("{did}#key-2")
+        } else {
+            format!("{did}#key-agreement-v{version}")
+        }
     }
 
     fn aead_key(shared_secret: &[u8; 32]) -> chacha20poly1305::Key {
@@ -493,8 +669,8 @@ impl Ed25519DidKeyStore {
 impl DidKeyStore for Ed25519DidKeyStore {
     fn sign(&self, signer: &Did, message: &[u8]) -> Result<String, DidError> {
         use ed25519_dalek::Signer;
-        let key = self.key(signer)?;
-        Ok(hex_encode(&key.signing.sign(message).to_bytes()))
+        let record = self.active_record(signer)?;
+        Ok(hex_encode(&record.key.signing.sign(message).to_bytes()))
     }
 
     fn verify(
@@ -504,6 +680,9 @@ impl DidKeyStore for Ed25519DidKeyStore {
         signature: &str,
     ) -> Result<(), DidError> {
         use ed25519_dalek::Verifier;
+        if self.retired_methods.contains(&method.id) {
+            return Err(DidError::RetiredKey(method.id.clone()));
+        }
         let public: [u8; 32] = method
             .public_key()?
             .try_into()
@@ -530,7 +709,7 @@ impl DidKeyStore for Ed25519DidKeyStore {
     ) -> Result<String, DidError> {
         use chacha20poly1305::KeyInit;
         use chacha20poly1305::aead::Aead;
-        let sender_key = self.key(sender)?;
+        let sender_key = &self.active_record(sender)?.key;
         let recipient: [u8; 32] = recipient_public_key
             .try_into()
             .map_err(|_| DidError::InvalidKey("x25519 public key must be 32 bytes".into()))?;
@@ -554,19 +733,31 @@ impl DidKeyStore for Ed25519DidKeyStore {
     ) -> Result<Vec<u8>, DidError> {
         use chacha20poly1305::KeyInit;
         use chacha20poly1305::aead::Aead;
-        let recipient_key = self.key(recipient)?;
         let sender: [u8; 32] = sender_public_key
             .try_into()
             .map_err(|_| DidError::InvalidKey("x25519 public key must be 32 bytes".into()))?;
-        let shared = recipient_key
-            .agreement
-            .diffie_hellman(&x25519_dalek::PublicKey::from(sender));
         let nonce: [u8; 12] = nonce.try_into().map_err(|_| DidError::InvalidNonce)?;
         let ciphertext = hex_decode(ciphertext_hex)?;
-        let cipher = chacha20poly1305::ChaCha20Poly1305::new(&Self::aead_key(shared.as_bytes()));
-        cipher
-            .decrypt(&chacha20poly1305::Nonce::from(nonce), ciphertext.as_slice())
-            .map_err(|_| DidError::DecryptionFailed)
+        let records = self
+            .keys
+            .get(recipient)
+            .ok_or_else(|| DidError::MissingPrivateKey(recipient.to_string()))?;
+
+        for record in records.iter().filter(|record| !record.retired) {
+            let shared = record
+                .key
+                .agreement
+                .diffie_hellman(&x25519_dalek::PublicKey::from(sender));
+            let cipher =
+                chacha20poly1305::ChaCha20Poly1305::new(&Self::aead_key(shared.as_bytes()));
+            if let Ok(plaintext) =
+                cipher.decrypt(&chacha20poly1305::Nonce::from(nonce), ciphertext.as_slice())
+            {
+                return Ok(plaintext);
+            }
+        }
+
+        Err(DidError::DecryptionFailed)
     }
 }
 
@@ -1165,15 +1356,29 @@ impl DidMessageGateway {
         )?;
 
         // Decryption uses the sender's *key-agreement* key, which may be a
-        // different key (X25519) than the authentication key (Ed25519).
-        let sender_agreement_key = sender_document.key_agreement_key()?;
+        // different key (X25519) than the authentication key (Ed25519). During
+        // key rotation, older in-flight envelopes may have used a previous
+        // sender agreement key, so try every non-retired key advertised by the
+        // sender document.
+        let sender_agreement_keys = sender_document.key_agreement_keys()?;
         let nonce = hex_decode(&envelope.nonce)?;
-        let plaintext = self.key_store.decrypt_for(
-            &self.recipient,
-            &sender_agreement_key.public_key()?,
-            &nonce,
-            &envelope.ciphertext,
-        )?;
+        let mut plaintext = None;
+        for sender_agreement_key in sender_agreement_keys {
+            match self.key_store.decrypt_for(
+                &self.recipient,
+                &sender_agreement_key.public_key()?,
+                &nonce,
+                &envelope.ciphertext,
+            ) {
+                Ok(opened) => {
+                    plaintext = Some(opened);
+                    break;
+                }
+                Err(DidError::DecryptionFailed) => {}
+                Err(err) => return Err(err),
+            }
+        }
+        let plaintext = plaintext.ok_or(DidError::DecryptionFailed)?;
         let resource = GenericResource::new(&envelope.body.resource, "did-prompt");
 
         Ok(OpenedDidEnvelope {
@@ -1450,6 +1655,25 @@ pub enum DidError {
     /// Referenced verification method is absent.
     #[error("missing verification method: {0}")]
     MissingVerificationMethod(String),
+    /// Referenced key version is absent.
+    #[error("missing key version {version} for DID {did}")]
+    MissingKeyVersion {
+        /// DID whose key version was requested.
+        did: String,
+        /// Missing key version.
+        version: u64,
+    },
+    /// Active key versions cannot be retired.
+    #[error("cannot retire active key version {version} for DID {did}")]
+    CannotRetireActiveKey {
+        /// DID whose active key would have been retired.
+        did: String,
+        /// Active key version.
+        version: u64,
+    },
+    /// Referenced key has been retired.
+    #[error("retired verification method: {0}")]
+    RetiredKey(String),
     /// Envelope signature did not verify.
     #[error("invalid DID envelope signature")]
     InvalidSignature,
@@ -2156,6 +2380,126 @@ mod tests {
             honest_store.verify(auth_method, b"message", &forged),
             Err(DidError::InvalidSignature)
         ));
+    }
+
+    #[test]
+    fn ed25519_rotation_keeps_old_envelopes_until_retired() {
+        let alice = Did::web("alice.example").expect("alice did");
+        let agent = Did::web("agent.example").expect("agent did");
+        let mut keys = Ed25519DidKeyStore::new()
+            .with_key(alice.clone(), Ed25519DidKey::from_seed(b"alice-v1"))
+            .with_key(agent.clone(), Ed25519DidKey::from_seed(b"agent-v1"));
+        let resolver_v1 = StaticDidResolver::new()
+            .with_document(keys.document(&alice).expect("alice v1 document"))
+            .with_document(keys.document(&agent).expect("agent v1 document"));
+
+        let old_envelope = DidEnvelope::prompt(
+            "msg-rot-1",
+            alice.clone(),
+            agent.clone(),
+            DidMessageBody::infer_prompt("prompt/session/rot"),
+            "old in-flight payload",
+            &resolver_v1,
+            &keys,
+        )
+        .expect("old envelope");
+        assert_eq!(old_envelope.kid, format!("{alice}#key-1"));
+
+        assert_eq!(
+            keys.rotate_key(&alice, Ed25519DidKey::from_seed(b"alice-v2"))
+                .expect("rotate alice"),
+            2
+        );
+        assert_eq!(
+            keys.rotate_key(&agent, Ed25519DidKey::from_seed(b"agent-v2"))
+                .expect("rotate agent"),
+            2
+        );
+        assert_eq!(keys.active_key_version(&alice).expect("active alice"), 2);
+
+        let resolver_v2 = StaticDidResolver::new()
+            .with_document(keys.document(&alice).expect("alice v2 document"))
+            .with_document(keys.document(&agent).expect("agent v2 document"));
+        let alice_doc = resolver_v2.resolve(&alice).expect("alice document");
+        assert_eq!(
+            alice_doc.authentication[0],
+            format!("{alice}#key-signing-v2")
+        );
+        assert_eq!(
+            alice_doc
+                .verification_method
+                .iter()
+                .find(|method| method.id == old_envelope.kid)
+                .and_then(|method| method.key_status.as_deref()),
+            Some("previous")
+        );
+
+        let gateway =
+            DidMessageGateway::new(Arc::new(resolver_v2.clone()), Arc::new(keys.clone()), agent);
+        let verified = gateway
+            .open_prompt(&old_envelope)
+            .expect("old envelope remains valid while previous key is advertised");
+        assert_eq!(
+            verified.resource.resource_id(),
+            "prompt/session/rot",
+            "old payload opened after sender and recipient rotation"
+        );
+
+        let new_envelope = DidEnvelope::prompt(
+            "msg-rot-2",
+            alice.clone(),
+            Did::web("agent.example").expect("agent did"),
+            DidMessageBody::infer_prompt("prompt/session/rot-new"),
+            "new payload",
+            &resolver_v2,
+            &keys,
+        )
+        .expect("new envelope");
+        assert_eq!(new_envelope.kid, format!("{alice}#key-signing-v2"));
+    }
+
+    #[test]
+    fn ed25519_retired_key_rejects_old_signatures() {
+        let alice = Did::web("alice-retired.example").expect("alice did");
+        let agent = Did::web("agent-retired.example").expect("agent did");
+        let mut keys = Ed25519DidKeyStore::new()
+            .with_key(alice.clone(), Ed25519DidKey::from_seed(b"alice-retired-v1"))
+            .with_key(agent.clone(), Ed25519DidKey::from_seed(b"agent-retired-v1"));
+        let resolver_v1 = StaticDidResolver::new()
+            .with_document(keys.document(&alice).expect("alice v1 document"))
+            .with_document(keys.document(&agent).expect("agent v1 document"));
+        let envelope = DidEnvelope::prompt(
+            "msg-retired-1",
+            alice.clone(),
+            agent.clone(),
+            DidMessageBody::infer_prompt("prompt/session/retired"),
+            "payload",
+            &resolver_v1,
+            &keys,
+        )
+        .expect("envelope");
+        let old_method = resolver_v1
+            .resolve(&alice)
+            .expect("alice document")
+            .authentication_key(&envelope.kid)
+            .expect("old auth method")
+            .clone();
+
+        keys.rotate_key(&alice, Ed25519DidKey::from_seed(b"alice-retired-v2"))
+            .expect("rotate alice");
+        keys.retire_key(&alice, 1).expect("retire old alice key");
+
+        assert!(matches!(
+            keys.verify(&old_method, envelope.signing_input().as_bytes(), &envelope.signature),
+            Err(DidError::RetiredKey(method)) if method == old_method.id
+        ));
+        let rotated_doc = keys.document(&alice).expect("rotated alice document");
+        assert!(
+            !rotated_doc
+                .authentication
+                .iter()
+                .any(|kid| kid == &envelope.kid)
+        );
     }
 
     struct AllowAllForTest;

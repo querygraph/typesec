@@ -657,6 +657,13 @@ with the `demo-crypto` feature. Production deployments can implement the same
 traits with DIDComm/JWE, HPKE, HSM/KMS-backed keys, Hyperledger Indy VDR,
 `did:web`, `did:key`, or a Universal Resolver client.
 
+The Ed25519 store is rotation-aware. `rotate_key(did, key)` adds a new active
+version, `active_key_version(did)` reports what new envelopes will use, and
+`document(did)` advertises non-retired verification methods as `active` or
+`previous`. Previous keys keep in-flight envelopes valid until
+`retire_key(did, version)` removes them from new documents and makes that
+verification method fail.
+
 ## DID-Wrapped Prompts and Ollama
 
 The first concrete DID use case is an encrypted prompt for a local or modified
@@ -1668,8 +1675,8 @@ declassification reasons, or audited release records that carry policy version
 and purpose.
 
 Tenth, deepen the DID cryptography story beyond the built-in Ed25519/X25519
-local key store. Real deployments still need key rotation, replay defense,
-DIDComm/JWE or HPKE interoperability, and KMS/HSM integration.
+local key store. Real deployments still need distributed rotation publication,
+replay defense, DIDComm/JWE or HPKE interoperability, and KMS/HSM integration.
 
 Eleventh, add real DID resolver backends. The trait boundary is in place for
 `did:key`, `did:web`, Universal Resolver, and Hyperledger Indy VDR. Those

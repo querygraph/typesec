@@ -29,6 +29,14 @@ X25519 key agreement, and ChaCha20-Poly1305 payload encryption. The deterministi
 resolver traits with DIDComm/JWE, HPKE, HSM/KMS-backed keys, Hyperledger Indy
 VDR, or a Universal Resolver client without changing the Typesec capability path.
 
+The Ed25519 store also supports local key rotation. `rotate_key(did, key)` adds
+a new active version, `active_key_version(did)` reports the signer/encrypter
+that new envelopes will use, and `document(did)` emits all non-retired
+verification methods with `active` or `previous` status. Previous versions keep
+in-flight envelopes verifiable and decryptable until `retire_key(did, version)`
+removes them from new DID documents and causes verification through that method
+to fail.
+
 ## Flow
 
 ```text
