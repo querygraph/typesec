@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use serde_json::json;
 use typesec_core::{
-    Capability, PolicyEngine, Resource,
+    Capability, PolicyEngine, Resource, ResourceId, SubjectId,
     permissions::{AiCanInfer, CanReadSensitive},
     policy::{PolicyResult, mint_capability},
     resource::GenericResource,
@@ -123,7 +123,9 @@ struct PromptPolicy {
 }
 
 impl PolicyEngine for PromptPolicy {
-    fn check(&self, subject: &str, action: &str, resource: &str) -> PolicyResult {
+    fn check(&self, subject: &SubjectId, action: &str, resource: &ResourceId) -> PolicyResult {
+        let subject = subject.as_str();
+        let resource = resource.as_str();
         if subject == self.allowed_subject
             && matches!(action, "ai:infer" | "read_sensitive")
             && resource == "prompt/session/123"

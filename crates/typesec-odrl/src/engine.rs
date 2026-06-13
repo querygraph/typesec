@@ -4,7 +4,10 @@ use std::collections::HashMap;
 
 use glob::Pattern;
 use tracing::debug;
-use typesec_core::policy::{PolicyEngine, PolicyResult, RequestContext};
+use typesec_core::{
+    ResourceId, SubjectId,
+    policy::{PolicyEngine, PolicyResult, RequestContext},
+};
 
 use crate::{
     audit::{ConstraintEval, OdrlAuditEvent, OdrlVerdict},
@@ -219,19 +222,24 @@ impl OdrlEngine {
 }
 
 impl PolicyEngine for OdrlEngine {
-    fn check(&self, subject: &str, action: &str, resource: &str) -> PolicyResult {
-        self.check_with_context(subject, action, resource, &self.default_context)
+    fn check(&self, subject: &SubjectId, action: &str, resource: &ResourceId) -> PolicyResult {
+        self.check_with_context(
+            subject.as_str(),
+            action,
+            resource.as_str(),
+            &self.default_context,
+        )
     }
 
     fn check_with_context(
         &self,
-        subject: &str,
+        subject: &SubjectId,
         action: &str,
-        resource: &str,
+        resource: &ResourceId,
         ctx: &RequestContext,
     ) -> PolicyResult {
         let ctx = ConstraintContext::from(ctx);
-        self.check_with_context(subject, action, resource, &ctx)
+        self.check_with_context(subject.as_str(), action, resource.as_str(), &ctx)
     }
 }
 

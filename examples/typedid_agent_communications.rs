@@ -13,7 +13,7 @@
 use std::sync::Arc;
 
 use typesec_core::{
-    Capability, PolicyEngine,
+    Capability, PolicyEngine, ResourceId, SubjectId,
     permissions::CanReadSensitive,
     policy::{CapabilityError, PolicyResult, mint_capability},
     resource::GenericResource,
@@ -156,7 +156,9 @@ struct AgentMessagePolicy {
 }
 
 impl PolicyEngine for AgentMessagePolicy {
-    fn check(&self, subject: &str, action: &str, resource: &str) -> PolicyResult {
+    fn check(&self, subject: &SubjectId, action: &str, resource: &ResourceId) -> PolicyResult {
+        let subject = subject.as_str();
+        let resource = resource.as_str();
         if subject == self.allowed_subject
             && action == "read_sensitive"
             && resource == "room/release-review"

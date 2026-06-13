@@ -24,7 +24,7 @@ use tracing_subscriber::{
 };
 use typesec_agent::SecureAgent;
 use typesec_core::{
-    Capability, Credentials, PolicyEngine, RequestContext,
+    Capability, Credentials, PolicyEngine, RequestContext, ResourceId, SubjectId,
     combinator::{CombineStrategy, PolicyEngineBuilder},
     lattice::LatticeEngine,
     permissions::{CanRead, CanWrite},
@@ -33,6 +33,34 @@ use typesec_core::{
 };
 use typesec_odrl::{OdrlEngine, constraint::ConstraintContext};
 use typesec_rbac::RbacEngine;
+
+fn check_engine<E: PolicyEngine + ?Sized>(
+    engine: &E,
+    subject: &str,
+    action: &str,
+    resource: &str,
+) -> PolicyResult {
+    engine.check(
+        &SubjectId::from(subject),
+        action,
+        &ResourceId::from(resource),
+    )
+}
+
+fn check_engine_with_context<E: PolicyEngine + ?Sized>(
+    engine: &E,
+    subject: &str,
+    action: &str,
+    resource: &str,
+    context: &RequestContext,
+) -> PolicyResult {
+    engine.check_with_context(
+        &SubjectId::from(subject),
+        action,
+        &ResourceId::from(resource),
+        context,
+    )
+}
 
 // ── RBAC policy for tests 1-3 ─────────────────────────────────────────────────
 
@@ -380,7 +408,7 @@ async fn test_06_combinator_deny_overrides() {
         .build();
 
     // RBAC → Allow; ODRL → Deny (prohibition); DenyOverrides → Deny
-    let result = composed.check("agent:combinator", "read", "shared/data");
+    let result = check_engine(&composed, "agent:combinator", "read", "shared/data");
     assert!(
         matches!(result, PolicyResult::Deny(_)),
         "DenyOverrides must yield Deny when any engine prohibits: {result:?}"
@@ -404,7 +432,7 @@ async fn test_07_combinator_allow_if_any() {
         .build();
 
     // RBAC → Deny (no assignment); ODRL → Allow; AllowIfAny → Allow
-    let result = composed.check("agent:odrl-only", "read", "private/data");
+    let result = check_engine(&composed, "agent:odrl-only", "read", "private/data");
     assert_eq!(
         result,
         PolicyResult::Allow,
@@ -425,7 +453,7 @@ async fn test_10_lattice_wraps_composed_engine_and_promotes_rbac_grant() {
         .build();
     let lattice = LatticeEngine::new(Arc::new(composed));
 
-    let result = lattice.check("agent:writer", "read", "data/file.csv");
+    let result = check_engine(&lattice, "agent:writer", "read", "data/file.csv");
 
     assert_eq!(
         result,
@@ -447,7 +475,8 @@ async fn test_11_deny_overrides_preserves_odrl_request_context() {
         .build();
 
     let ctx = RequestContext::default().with_purpose("training");
-    let result = composed.check_with_context("agent:combinator", "read", "shared/data", &ctx);
+    let result =
+        check_engine_with_context(&composed, "agent:combinator", "read", "shared/data", &ctx);
 
     assert!(
         matches!(result, PolicyResult::Deny(_)),
@@ -467,7 +496,7 @@ async fn test_12_priority_order_delegates_to_rbac_allow() {
         .strategy(CombineStrategy::PriorityOrder)
         .build();
 
-    let result = composed.check("agent:combinator", "read", "shared/data");
+    let result = check_engine(&composed, "agent:combinator", "read", "shared/data");
 
     assert_eq!(result, PolicyResult::Allow);
 }
@@ -485,7 +514,7 @@ async fn test_13_allow_if_all_requires_both_engines_to_allow() {
         .build();
 
     assert_eq!(
-        both_allow.check("agent:combinator", "read", "shared/data"),
+        check_engine(&both_allow, "agent:combinator", "read", "shared/data"),
         PolicyResult::Allow
     );
 
@@ -500,7 +529,7 @@ async fn test_13_allow_if_all_requires_both_engines_to_allow() {
         .build();
 
     assert!(matches!(
-        one_denies.check("agent:odrl-only", "read", "private/data"),
+        check_engine(&one_denies, "agent:odrl-only", "read", "private/data"),
         PolicyResult::Deny(_)
     ));
 }

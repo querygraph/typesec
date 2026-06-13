@@ -8,8 +8,8 @@ use typesec_core::{
 fn main() {
     let _cap: Capability<CanRead, GenericResource> = Capability {
         id: unsafe { std::mem::zeroed() },
-        subject: "agent:forged".to_string(),
-        resource_id: "reports/q1".to_string(),
+        subject: "agent:forged".into(),
+        resource_id: "reports/q1".into(),
         issued_at: SystemTime::now(),
         expires_at: SystemTime::now(),
         revocation: None::<(RevocationEpoch, u64)>,

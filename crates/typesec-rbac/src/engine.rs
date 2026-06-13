@@ -4,7 +4,10 @@ use std::collections::{HashMap, HashSet};
 
 use glob::Pattern;
 use tracing::debug;
-use typesec_core::policy::{PolicyEngine, PolicyResult};
+use typesec_core::{
+    ResourceId, SubjectId,
+    policy::{PolicyEngine, PolicyResult},
+};
 
 use crate::model::RbacPolicy;
 
@@ -156,7 +159,9 @@ impl RbacEngine {
 }
 
 impl PolicyEngine for RbacEngine {
-    fn check(&self, subject: &str, action: &str, resource: &str) -> PolicyResult {
+    fn check(&self, subject: &SubjectId, action: &str, resource: &ResourceId) -> PolicyResult {
+        let subject = subject.as_str();
+        let resource = resource.as_str();
         debug!(subject, action, resource, "rbac check");
 
         let exact_grants = self.subject_grants.get(subject).into_iter().flatten();
@@ -261,11 +266,19 @@ assignments:
         RbacEngine::from_yaml(YAML).expect("engine build should succeed")
     }
 
+    fn check(e: &RbacEngine, subject: &str, action: &str, resource: &str) -> PolicyResult {
+        e.check(
+            &SubjectId::from(subject),
+            action,
+            &ResourceId::from(resource),
+        )
+    }
+
     #[test]
     fn analyst_can_read_reports() {
         let e = engine();
         assert_eq!(
-            e.check("agent:data-pipeline", "read", "reports/q1"),
+            check(&e, "agent:data-pipeline", "read", "reports/q1"),
             PolicyResult::Allow
         );
     }
@@ -274,7 +287,7 @@ assignments:
     fn analyst_cannot_write() {
         let e = engine();
         assert!(matches!(
-            e.check("agent:data-pipeline", "write", "reports/q1"),
+            check(&e, "agent:data-pipeline", "write", "reports/q1"),
             PolicyResult::Deny(_)
         ));
     }
@@ -283,7 +296,7 @@ assignments:
     fn engineer_can_write_code() {
         let e = engine();
         assert_eq!(
-            e.check("agent:deploy-bot", "write", "code/main.rs"),
+            check(&e, "agent:deploy-bot", "write", "code/main.rs"),
             PolicyResult::Allow
         );
     }
@@ -292,7 +305,7 @@ assignments:
     fn engineer_cannot_access_reports() {
         let e = engine();
         assert!(matches!(
-            e.check("agent:deploy-bot", "read", "reports/q1"),
+            check(&e, "agent:deploy-bot", "read", "reports/q1"),
             PolicyResult::Deny(_)
         ));
     }
@@ -302,17 +315,17 @@ assignments:
         let e = engine();
         // Inherited from analyst:
         assert_eq!(
-            e.check("agent:superuser", "read_sensitive", "reports/q1"),
+            check(&e, "agent:superuser", "read_sensitive", "reports/q1"),
             PolicyResult::Allow
         );
         // Inherited from engineer:
         assert_eq!(
-            e.check("agent:superuser", "execute", "code/deploy.sh"),
+            check(&e, "agent:superuser", "execute", "code/deploy.sh"),
             PolicyResult::Allow
         );
         // Own permissions:
         assert_eq!(
-            e.check("agent:superuser", "delete", "anything"),
+            check(&e, "agent:superuser", "delete", "anything"),
             PolicyResult::Allow
         );
     }
@@ -340,7 +353,7 @@ assignments:
     fn unknown_subject_is_denied() {
         let e = engine();
         assert!(matches!(
-            e.check("agent:ghost", "read", "reports/q1"),
+            check(&e, "agent:ghost", "read", "reports/q1"),
             PolicyResult::Deny(_)
         ));
     }
@@ -359,11 +372,11 @@ assignments:
 "#;
         let e = RbacEngine::from_yaml(yaml).expect("engine build should succeed");
         assert_eq!(
-            e.check("agent:deploy-prod", "execute", "infra/restart"),
+            check(&e, "agent:deploy-prod", "execute", "infra/restart"),
             PolicyResult::Allow
         );
         assert!(matches!(
-            e.check("agent:build-prod", "execute", "infra/restart"),
+            check(&e, "agent:build-prod", "execute", "infra/restart"),
             PolicyResult::Deny(_)
         ));
     }
@@ -387,11 +400,11 @@ assignments:
 "#;
         let e = RbacEngine::from_yaml(yaml).expect("engine build should succeed");
         assert_eq!(
-            e.check("agent:report-prod", "read", "reports/q1"),
+            check(&e, "agent:report-prod", "read", "reports/q1"),
             PolicyResult::Allow
         );
         assert_eq!(
-            e.check("agent:report-prod", "write", "reports/q1"),
+            check(&e, "agent:report-prod", "write", "reports/q1"),
             PolicyResult::Allow
         );
     }

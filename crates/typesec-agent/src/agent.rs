@@ -104,9 +104,13 @@ impl SecureAgent<Authenticated> {
 
         debug!(%subject, action, %resource_id, "requesting capability");
 
-        let cap =
-            mint_capability_for_id_async::<P, R>(engine.as_ref(), &subject, &resource_id, &options)
-                .await?;
+        let cap = mint_capability_for_id_async::<P, R>(
+            engine.as_ref(),
+            subject.as_str(),
+            resource_id.as_str(),
+            &options,
+        )
+        .await?;
 
         info!(%subject, action, %resource_id, "capability granted");
 
@@ -250,18 +254,21 @@ impl Default for AgentBuilder {
 mod tests {
     use super::*;
     use std::sync::Arc;
-    use typesec_core::{permissions::CanRead, policy::PolicyResult, resource::GenericResource};
+    use typesec_core::{
+        ResourceId, SubjectId, permissions::CanRead, policy::PolicyResult,
+        resource::GenericResource,
+    };
 
     struct AllowAll;
     impl PolicyEngine for AllowAll {
-        fn check(&self, _: &str, _: &str, _: &str) -> PolicyResult {
+        fn check(&self, _: &SubjectId, _: &str, _: &ResourceId) -> PolicyResult {
             PolicyResult::Allow
         }
     }
 
     struct DenyAll;
     impl PolicyEngine for DenyAll {
-        fn check(&self, _: &str, _: &str, _: &str) -> PolicyResult {
+        fn check(&self, _: &SubjectId, _: &str, _: &ResourceId) -> PolicyResult {
             PolicyResult::Deny("DenyAll".into())
         }
     }

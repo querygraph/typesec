@@ -5,7 +5,10 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::debug;
-use typesec_core::policy::{PolicyEngine, PolicyResult};
+use typesec_core::{
+    ResourceId, SubjectId,
+    policy::{PolicyEngine, PolicyResult},
+};
 
 use crate::http::{HttpClient, ReqwestHttpClient};
 
@@ -92,7 +95,9 @@ impl WorkOsFgaEngine {
 }
 
 impl PolicyEngine for WorkOsFgaEngine {
-    fn check(&self, subject: &str, action: &str, resource: &str) -> PolicyResult {
+    fn check(&self, subject: &SubjectId, action: &str, resource: &ResourceId) -> PolicyResult {
+        let subject = subject.as_str();
+        let resource = resource.as_str();
         debug!(subject, action, resource, "workos fga check");
 
         let request = match self.request_for(action, resource) {
@@ -138,6 +143,19 @@ mod tests {
     use crate::http::StaticHttpClient;
     use serde_json::json;
 
+    fn check(
+        engine: &WorkOsFgaEngine,
+        subject: &str,
+        action: &str,
+        resource: &str,
+    ) -> PolicyResult {
+        engine.check(
+            &SubjectId::from(subject),
+            action,
+            &ResourceId::from(resource),
+        )
+    }
+
     #[test]
     fn parses_resource_ids_for_workos() {
         let parsed = WorkOsResource::parse("project/proj_123").expect("parse");
@@ -153,7 +171,7 @@ mod tests {
             WorkOsFgaEngine::with_http("sk_test", "https://api.workos.test", Arc::new(http));
 
         assert_eq!(
-            engine.check("om_1", "edit", "project/proj_123"),
+            check(&engine, "om_1", "edit", "project/proj_123"),
             PolicyResult::Allow
         );
     }
@@ -166,7 +184,7 @@ mod tests {
             WorkOsFgaEngine::with_http("sk_test", "https://api.workos.test", Arc::new(http));
 
         assert!(matches!(
-            engine.check("om_1", "edit", "project/proj_123"),
+            check(&engine, "om_1", "edit", "project/proj_123"),
             PolicyResult::Deny(_)
         ));
     }

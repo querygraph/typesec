@@ -4,7 +4,10 @@ use anyhow::Result;
 use clap::Args;
 use serde::Serialize;
 use std::path::PathBuf;
-use typesec_core::policy::{PolicyEngine, PolicyResult, RequestContext};
+use typesec_core::{
+    ResourceId, SubjectId,
+    policy::{PolicyEngine, PolicyResult, RequestContext},
+};
 
 #[derive(Args)]
 pub struct CheckArgs {
@@ -46,34 +49,24 @@ pub fn run(args: CheckArgs) -> Result<()> {
         .map_or_else(RequestContext::default, |purpose| {
             RequestContext::default().with_purpose(purpose.clone())
         });
+    let subject = SubjectId::from(args.subject.as_str());
+    let resource = ResourceId::from(args.resource.as_str());
 
     let result = match format.as_deref() {
         Some("rbac") => {
             let engine =
                 typesec_rbac::RbacEngine::from_yaml(&yaml).map_err(|e| anyhow::anyhow!(e))?;
-            PolicyEngine::check_with_context(
-                &engine,
-                &args.subject,
-                &args.action,
-                &args.resource,
-                &context,
-            )
+            PolicyEngine::check_with_context(&engine, &subject, &args.action, &resource, &context)
         }
         Some("odrl") => {
             let engine =
                 typesec_odrl::OdrlEngine::from_yaml(&yaml).map_err(|e| anyhow::anyhow!(e))?;
-            PolicyEngine::check_with_context(
-                &engine,
-                &args.subject,
-                &args.action,
-                &args.resource,
-                &context,
-            )
+            PolicyEngine::check_with_context(&engine, &subject, &args.action, &resource, &context)
         }
         Some("graph") => {
             let engine = typesec_rbac::GraphPolicyEngine::from_yaml(&yaml)
                 .map_err(|e| anyhow::anyhow!(e))?;
-            engine.check_with_context(&args.subject, &args.action, &args.resource, &context)
+            engine.check_with_context(&subject, &args.action, &resource, &context)
         }
         _ => anyhow::bail!(
             "Could not detect policy format. Use --format rbac, --format odrl, or --format graph"

@@ -11,8 +11,11 @@ use jsonwebtoken::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tracing::debug;
-use typesec_core::policy::{PolicyEngine, PolicyResult};
 use typesec_core::typestate::{AgentError, Authenticator, Credentials};
+use typesec_core::{
+    ResourceId, SubjectId,
+    policy::{PolicyEngine, PolicyResult},
+};
 
 use crate::http::{HttpClient, ReqwestHttpClient};
 
@@ -320,7 +323,9 @@ impl JwtClaimsEngine {
 }
 
 impl PolicyEngine for JwtClaimsEngine {
-    fn check(&self, subject: &str, action: &str, resource: &str) -> PolicyResult {
+    fn check(&self, subject: &SubjectId, action: &str, resource: &ResourceId) -> PolicyResult {
+        let subject = subject.as_str();
+        let resource = resource.as_str();
         debug!(subject, action, resource, org_id = ?self.org_id, "jwt claims check");
 
         if subject != self.subject {
@@ -352,11 +357,24 @@ mod tests {
     use jsonwebtoken::{EncodingKey, Header, encode};
     use serde_json::json;
 
+    fn check(
+        engine: &JwtClaimsEngine,
+        subject: &str,
+        action: &str,
+        resource: &str,
+    ) -> PolicyResult {
+        engine.check(
+            &SubjectId::from(subject),
+            action,
+            &ResourceId::from(resource),
+        )
+    }
+
     #[test]
     fn jwt_claims_engine_allows_direct_permission() {
         let engine = JwtClaimsEngine::from_permissions("user_1", ["read".to_string()]);
         assert_eq!(
-            engine.check("user_1", "read", "project/123"),
+            check(&engine, "user_1", "read", "project/123"),
             PolicyResult::Allow
         );
     }
@@ -365,7 +383,7 @@ mod tests {
     fn jwt_claims_engine_allows_resource_type_permission() {
         let engine = JwtClaimsEngine::from_permissions("user_1", ["project:edit".to_string()]);
         assert_eq!(
-            engine.check("user_1", "edit", "project/123"),
+            check(&engine, "user_1", "edit", "project/123"),
             PolicyResult::Allow
         );
     }
@@ -374,7 +392,7 @@ mod tests {
     fn jwt_claims_engine_delegates_missing_permission() {
         let engine = JwtClaimsEngine::from_permissions("user_1", ["read".to_string()]);
         assert!(matches!(
-            engine.check("user_1", "write", "project/123"),
+            check(&engine, "user_1", "write", "project/123"),
             PolicyResult::Delegate(_)
         ));
     }

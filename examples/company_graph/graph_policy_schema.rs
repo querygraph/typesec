@@ -6,7 +6,10 @@
 //! the validated graph through Grust's typed backend path.
 
 use grust::prelude::{GraphStore, MemoryGraphStore};
-use typesec_core::policy::{PolicyEngine, PolicyResult};
+use typesec_core::{
+    ResourceId, SubjectId,
+    policy::{PolicyEngine, PolicyResult},
+};
 use typesec_rbac::graph_policy::{GraphPolicyDocument, GraphPolicyEngine, company_graph_schema};
 
 const POLICY_YAML: &str = include_str!("../../policies/graph-corporate-example.yaml");
@@ -76,9 +79,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let engine = GraphPolicyEngine::new(json_doc)?;
     let decision = engine.check(
-        "agent:hr-onboarding",
+        &SubjectId::from("agent:hr-onboarding"),
         "write",
-        "employee/private/employee:nia",
+        &ResourceId::from("employee/private/employee:nia"),
     );
     assert_eq!(decision, PolicyResult::Allow);
     println!("typed JSON policy grants HR write access to Nia's private employee node");

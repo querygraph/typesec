@@ -250,10 +250,11 @@ impl Agent<Authenticated> {
 mod tests {
     use super::*;
     use crate::policy::PolicyResult;
+    use crate::{ResourceId, SubjectId};
 
     struct AllowAll;
     impl PolicyEngine for AllowAll {
-        fn check(&self, _: &str, _: &str, _: &str) -> PolicyResult {
+        fn check(&self, _: &SubjectId, _: &str, _: &ResourceId) -> PolicyResult {
             PolicyResult::Allow
         }
     }

@@ -1867,7 +1867,7 @@ mod tests {
 
     use serde_json::json;
     use typesec_core::{
-        PolicyEngine, Resource,
+        PolicyEngine, Resource, ResourceId, SubjectId,
         permissions::{AiCanInfer, CanReadSensitive},
         policy::{PolicyResult, mint_capability},
     };
@@ -1878,7 +1878,9 @@ mod tests {
     struct PromptPolicy;
 
     impl PolicyEngine for PromptPolicy {
-        fn check(&self, subject: &str, action: &str, resource: &str) -> PolicyResult {
+        fn check(&self, subject: &SubjectId, action: &str, resource: &ResourceId) -> PolicyResult {
+            let subject = subject.as_str();
+            let resource = resource.as_str();
             if subject == "did:key:z616c696365"
                 && matches!(action, "ai:infer" | "read_sensitive")
                 && resource == "prompt/session/123"
@@ -1915,7 +1917,9 @@ mod tests {
     }
 
     impl PolicyEngine for AgentPolicy {
-        fn check(&self, subject: &str, action: &str, resource: &str) -> PolicyResult {
+        fn check(&self, subject: &SubjectId, action: &str, resource: &ResourceId) -> PolicyResult {
+            let subject = subject.as_str();
+            let resource = resource.as_str();
             if subject == self.allowed_subject
                 && matches!(
                     action,
@@ -2504,7 +2508,7 @@ mod tests {
 
     struct AllowAllForTest;
     impl PolicyEngine for AllowAllForTest {
-        fn check(&self, _: &str, _: &str, _: &str) -> PolicyResult {
+        fn check(&self, _: &SubjectId, _: &str, _: &ResourceId) -> PolicyResult {
             PolicyResult::Allow
         }
     }

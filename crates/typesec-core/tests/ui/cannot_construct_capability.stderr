@@ -5,9 +5,9 @@ error[E0451]: fields `id`, `subject`, `resource_id`, `issued_at`, `expires_at`, 
    |                                                      ---------- in this type
 10 |         id: unsafe { std::mem::zeroed() },
    |         ^^ private field
-11 |         subject: "agent:forged".to_string(),
+11 |         subject: "agent:forged".into(),
    |         ^^^^^^^ private field
-12 |         resource_id: "reports/q1".to_string(),
+12 |         resource_id: "reports/q1".into(),
    |         ^^^^^^^^^^^ private field
 13 |         issued_at: SystemTime::now(),
    |         ^^^^^^^^^ private field

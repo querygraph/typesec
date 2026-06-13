@@ -63,11 +63,11 @@ pub use permissions::{
 pub use policy::{
     AsyncPolicyEngine, AuditEvent, AuditFuture, AuditSink, AuditTimestamp, DelegationReason,
     FallbackEngine, MintOptions, PolicyEngine, PolicyFuture, PolicyResult, RequestContext,
-    TracingAuditSink, format_audit_timestamp, mint_capability, mint_capability_async,
+    SubjectId, TracingAuditSink, format_audit_timestamp, mint_capability, mint_capability_async,
     mint_capability_for_id, mint_capability_for_id_async, mint_capability_with,
     mint_capability_with_async, set_audit_sink,
 };
-pub use resource::Resource;
+pub use resource::{Resource, ResourceId};
 pub use role::Role;
 pub use secure_value::{
     Internal, Join, PrivacyLevel, Public, Secret, SecureAccessError, SecureValue, Sensitive,

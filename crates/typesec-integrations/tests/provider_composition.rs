@@ -3,12 +3,20 @@ use std::sync::Arc;
 use serde_json::json;
 use typesec_core::{
     CanExecute, CanWrite, Capability, CombineStrategy, PolicyEngine, PolicyEngineBuilder,
-    PolicyResult, mint_capability, resource::GenericResource,
+    PolicyResult, ResourceId, SubjectId, mint_capability, resource::GenericResource,
 };
 use typesec_integrations::{
     ArcadeToolAuthEngine, JwtClaimsEngine, WorkOsFgaEngine,
     http::{RecordingHttpClient, StaticHttpClient},
 };
+
+fn check(engine: &dyn PolicyEngine, subject: &str, action: &str, resource: &str) -> PolicyResult {
+    engine.check(
+        &SubjectId::from(subject),
+        action,
+        &ResourceId::from(resource),
+    )
+}
 
 #[test]
 fn workos_engine_posts_expected_authorization_check() {
@@ -18,7 +26,7 @@ fn workos_engine_posts_expected_authorization_check() {
     let engine = WorkOsFgaEngine::with_http("sk_test", "https://api.workos.test", Arc::new(http));
 
     assert_eq!(
-        engine.check("om_123", "edit", "project/proj_123"),
+        check(&engine, "om_123", "edit", "project/proj_123"),
         PolicyResult::Allow
     );
 
@@ -46,7 +54,7 @@ fn arcade_engine_posts_expected_tool_authorization_check() {
             .with_tool_mapping("gmail/list", "Gmail.ListEmails");
 
     assert_eq!(
-        engine.check("user@example.com", "execute", "gmail/list"),
+        check(&engine, "user@example.com", "execute", "gmail/list"),
         PolicyResult::Allow
     );
 

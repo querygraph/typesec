@@ -38,7 +38,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{PoisonError, RwLock};
 use std::time::{Duration, SystemTime};
 
-use crate::{Permission, Resource};
+use crate::{Permission, Resource, ResourceId, SubjectId};
 
 /// Default lease duration for minted capabilities.
 ///
@@ -171,9 +171,9 @@ pub struct Capability<P: Permission, R: Resource> {
     /// Unique id for this minted proof.
     id: CapabilityId,
     /// The subject (agent identity) that was granted this capability.
-    subject: String,
+    subject: SubjectId,
     /// The resource identifier (path, URI, etc.) this capability covers.
-    resource_id: String,
+    resource_id: ResourceId,
     /// When the policy engine minted this capability.
     issued_at: SystemTime,
     /// When this cached policy decision expires.
@@ -198,8 +198,8 @@ impl<P: Permission, R: Resource> Capability<P, R> {
     /// shorthand remains for in-crate tests.
     #[cfg(test)]
     pub(crate) fn new_unchecked(
-        subject: impl Into<String>,
-        resource_id: impl Into<String>,
+        subject: impl Into<SubjectId>,
+        resource_id: impl Into<ResourceId>,
     ) -> Self {
         Self::new_with_issued_at(subject, resource_id, SystemTime::now())
     }
@@ -207,8 +207,8 @@ impl<P: Permission, R: Resource> Capability<P, R> {
     /// Internal constructor preserving an existing issue time (used by tests).
     #[cfg(test)]
     pub(crate) fn new_with_issued_at(
-        subject: impl Into<String>,
-        resource_id: impl Into<String>,
+        subject: impl Into<SubjectId>,
+        resource_id: impl Into<ResourceId>,
         issued_at: SystemTime,
     ) -> Self {
         Self::new_minted(
@@ -223,8 +223,8 @@ impl<P: Permission, R: Resource> Capability<P, R> {
 
     /// Internal constructor with full lease parameters (used by minting).
     pub(crate) fn new_minted(
-        subject: impl Into<String>,
-        resource_id: impl Into<String>,
+        subject: impl Into<SubjectId>,
+        resource_id: impl Into<ResourceId>,
         issued_at: SystemTime,
         ttl: Duration,
         revocation: Option<RevocationEpoch>,
@@ -271,12 +271,12 @@ impl<P: Permission, R: Resource> Capability<P, R> {
     }
 
     /// The subject that holds this capability.
-    pub fn subject(&self) -> &str {
+    pub fn subject(&self) -> &SubjectId {
         &self.subject
     }
 
     /// The resource identifier this capability covers.
-    pub fn resource_id(&self) -> &str {
+    pub fn resource_id(&self) -> &ResourceId {
         &self.resource_id
     }
 

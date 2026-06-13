@@ -8,7 +8,7 @@
 use std::marker::PhantomData;
 
 use crate::{
-    Capability, Resource,
+    Capability, Resource, ResourceId,
     permissions::{CanDeclassify, CanReadInternal, CanReadSensitive},
 };
 
@@ -144,7 +144,7 @@ pub enum SecureValueError {
 #[derive(Clone)]
 pub struct SecureValue<L: PrivacyLevel, T, R: Resource> {
     value: T,
-    resource_id: String,
+    resource_id: ResourceId,
     _label: PhantomData<fn() -> L>,
     _resource: PhantomData<fn() -> R>,
 }
@@ -154,7 +154,7 @@ impl<L: PrivacyLevel, T, R: Resource> SecureValue<L, T, R> {
     pub fn protect(value: T, resource: &R) -> Self {
         Self {
             value,
-            resource_id: resource.resource_id().to_owned(),
+            resource_id: ResourceId::from(resource.resource_id()),
             _label: PhantomData,
             _resource: PhantomData,
         }
@@ -162,7 +162,7 @@ impl<L: PrivacyLevel, T, R: Resource> SecureValue<L, T, R> {
 
     /// Runtime identifier of the resource this value came from.
     pub fn resource_id(&self) -> &str {
-        &self.resource_id
+        self.resource_id.as_str()
     }
 
     /// The type-level privacy label name.
@@ -195,8 +195,8 @@ impl<L: PrivacyLevel, T, R: Resource> SecureValue<L, T, R> {
     {
         if self.resource_id != other.resource_id {
             return Err(SecureValueError::ResourceIdMismatch {
-                left_resource: self.resource_id,
-                right_resource: other.resource_id,
+                left_resource: self.resource_id.to_string(),
+                right_resource: other.resource_id.to_string(),
             });
         }
 
@@ -245,14 +245,14 @@ impl<L: PrivacyLevel, T, R: Resource> SecureValue<L, T, R> {
 
     fn check_capability_resource(
         &self,
-        capability_resource: &str,
+        capability_resource: &ResourceId,
     ) -> Result<(), SecureAccessError> {
-        if capability_resource == self.resource_id {
+        if capability_resource == &self.resource_id {
             Ok(())
         } else {
             Err(SecureAccessError::ResourceMismatch {
-                capability_resource: capability_resource.to_owned(),
-                value_resource: self.resource_id.clone(),
+                capability_resource: capability_resource.to_string(),
+                value_resource: self.resource_id.to_string(),
             })
         }
     }

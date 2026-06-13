@@ -27,6 +27,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
 use std::future::Future;
+use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::{Arc, OnceLock, RwLock};
 use std::time::{Duration, SystemTime};
@@ -35,7 +36,62 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use tracing::{info, warn};
 
 use crate::capability::{CapabilityRevocationList, DEFAULT_CAPABILITY_TTL, RevocationEpoch};
-use crate::{Capability, Permission, Resource};
+use crate::{Capability, Permission, Resource, ResourceId};
+
+/// Stable identifier for a policy subject or agent identity.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct SubjectId(String);
+
+impl SubjectId {
+    /// Borrow this identifier as a string slice.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<&str> for SubjectId {
+    fn from(value: &str) -> Self {
+        Self(value.to_owned())
+    }
+}
+
+impl From<String> for SubjectId {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl AsRef<str> for SubjectId {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl PartialEq<str> for SubjectId {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+
+impl PartialEq<&str> for SubjectId {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+
+impl Deref for SubjectId {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        self.as_str()
+    }
+}
+
+impl fmt::Display for SubjectId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 
 /// Boxed async policy-decision future.
 pub type PolicyFuture<'a> = Pin<Box<dyn Future<Output = PolicyResult> + Send + 'a>>;
@@ -199,11 +255,11 @@ pub fn format_audit_timestamp(timestamp: &AuditTimestamp) -> String {
 #[derive(Debug)]
 pub struct AuditEvent {
     /// The agent making the request.
-    pub subject: String,
+    pub subject: SubjectId,
     /// The action being requested (e.g., `"write"`).
     pub action: String,
     /// The resource being accessed.
-    pub resource: String,
+    pub resource: ResourceId,
     /// The engine's verdict.
     pub result: PolicyResult,
     /// UTC timestamp.
@@ -335,7 +391,7 @@ pub trait PolicyEngine: Send + Sync {
     /// * `subject` — agent identity, e.g., `"agent:summarizer"`.
     /// * `action` — permission name, e.g., `"read"` (matches [`Permission::name()`]).
     /// * `resource` — resource identifier, e.g., `"reports/q1"`.
-    fn check(&self, subject: &str, action: &str, resource: &str) -> PolicyResult;
+    fn check(&self, subject: &SubjectId, action: &str, resource: &ResourceId) -> PolicyResult;
 
     /// Evaluate whether `subject` may perform `action` on `resource`
     /// asynchronously.
@@ -345,9 +401,9 @@ pub trait PolicyEngine: Send + Sync {
     /// async executor.
     fn check_async<'a>(
         &'a self,
-        subject: &'a str,
+        subject: &'a SubjectId,
         action: &'a str,
-        resource: &'a str,
+        resource: &'a ResourceId,
     ) -> PolicyFuture<'a> {
         Box::pin(async move { self.check(subject, action, resource) })
     }
@@ -357,9 +413,9 @@ pub trait PolicyEngine: Send + Sync {
     /// Engines that do not use contextual constraints can rely on this default.
     fn check_with_context(
         &self,
-        subject: &str,
+        subject: &SubjectId,
         action: &str,
-        resource: &str,
+        resource: &ResourceId,
         _ctx: &RequestContext,
     ) -> PolicyResult {
         self.check(subject, action, resource)
@@ -372,9 +428,9 @@ pub trait PolicyEngine: Send + Sync {
     /// IO-bound engines can override this method directly.
     fn check_with_context_async<'a>(
         &'a self,
-        subject: &'a str,
+        subject: &'a SubjectId,
         action: &'a str,
-        resource: &'a str,
+        resource: &'a ResourceId,
         ctx: &'a RequestContext,
     ) -> PolicyFuture<'a> {
         Box::pin(async move { self.check_with_context(subject, action, resource, ctx) })
@@ -404,17 +460,17 @@ pub trait AsyncPolicyEngine: Send + Sync {
     /// asynchronously.
     fn check_async<'a>(
         &'a self,
-        subject: &'a str,
+        subject: &'a SubjectId,
         action: &'a str,
-        resource: &'a str,
+        resource: &'a ResourceId,
     ) -> PolicyFuture<'a>;
 
     /// Evaluate a request with runtime context asynchronously.
     fn check_with_context_async<'a>(
         &'a self,
-        subject: &'a str,
+        subject: &'a SubjectId,
         action: &'a str,
-        resource: &'a str,
+        resource: &'a ResourceId,
         ctx: &'a RequestContext,
     ) -> PolicyFuture<'a>;
 }
@@ -422,18 +478,18 @@ pub trait AsyncPolicyEngine: Send + Sync {
 impl<T: PolicyEngine + ?Sized> AsyncPolicyEngine for T {
     fn check_async<'a>(
         &'a self,
-        subject: &'a str,
+        subject: &'a SubjectId,
         action: &'a str,
-        resource: &'a str,
+        resource: &'a ResourceId,
     ) -> PolicyFuture<'a> {
         PolicyEngine::check_async(self, subject, action, resource)
     }
 
     fn check_with_context_async<'a>(
         &'a self,
-        subject: &'a str,
+        subject: &'a SubjectId,
         action: &'a str,
-        resource: &'a str,
+        resource: &'a ResourceId,
         ctx: &'a RequestContext,
     ) -> PolicyFuture<'a> {
         PolicyEngine::check_with_context_async(self, subject, action, resource, ctx)
@@ -457,7 +513,7 @@ impl<T: PolicyEngine + ?Sized> AsyncPolicyEngine for T {
 #[must_use = "capability minting can fail and the returned proof should be used"]
 pub fn mint_capability<P: Permission, R: Resource>(
     engine: &dyn PolicyEngine,
-    subject: &str,
+    subject: impl Into<SubjectId>,
     resource: &R,
 ) -> Result<Capability<P, R>, CapabilityError> {
     mint_capability_for_id(
@@ -472,11 +528,16 @@ pub fn mint_capability<P: Permission, R: Resource>(
 #[must_use = "capability minting can fail and the returned proof should be used"]
 pub async fn mint_capability_async<P: Permission, R: Resource>(
     engine: &dyn PolicyEngine,
-    subject: &str,
+    subject: impl Into<SubjectId>,
     resource: &R,
 ) -> Result<Capability<P, R>, CapabilityError> {
-    let resource_id = resource.resource_id().to_owned();
-    mint_capability_for_id_async(engine, subject, &resource_id, &MintOptions::default()).await
+    mint_capability_for_id_async(
+        engine,
+        subject,
+        resource.resource_id(),
+        &MintOptions::default(),
+    )
+    .await
 }
 
 /// Lease parameters for capability minting.
@@ -523,7 +584,7 @@ impl MintOptions {
 #[must_use = "capability minting can fail and the returned proof should be used"]
 pub fn mint_capability_with<P: Permission, R: Resource>(
     engine: &dyn PolicyEngine,
-    subject: &str,
+    subject: impl Into<SubjectId>,
     resource: &R,
     options: &MintOptions,
 ) -> Result<Capability<P, R>, CapabilityError> {
@@ -534,12 +595,11 @@ pub fn mint_capability_with<P: Permission, R: Resource>(
 #[must_use = "capability minting can fail and the returned proof should be used"]
 pub async fn mint_capability_with_async<P: Permission, R: Resource>(
     engine: &dyn PolicyEngine,
-    subject: &str,
+    subject: impl Into<SubjectId>,
     resource: &R,
     options: &MintOptions,
 ) -> Result<Capability<P, R>, CapabilityError> {
-    let resource_id = resource.resource_id().to_owned();
-    mint_capability_for_id_async(engine, subject, &resource_id, options).await
+    mint_capability_for_id_async(engine, subject, resource.resource_id(), options).await
 }
 
 /// Mint a capability for a resource identified only by its id string.
@@ -552,19 +612,21 @@ pub async fn mint_capability_with_async<P: Permission, R: Resource>(
 #[must_use = "capability minting can fail and the returned proof should be used"]
 pub fn mint_capability_for_id<P: Permission, R: Resource>(
     engine: &dyn PolicyEngine,
-    subject: &str,
-    resource_id: &str,
+    subject: impl Into<SubjectId>,
+    resource_id: impl Into<ResourceId>,
     options: &MintOptions,
 ) -> Result<Capability<P, R>, CapabilityError> {
+    let subject = subject.into();
+    let resource_id = resource_id.into();
     let action = P::name();
 
-    let result = engine.check_with_context(subject, action, resource_id, &options.context);
+    let result = engine.check_with_context(&subject, action, &resource_id, &options.context);
 
     // Emit the structured audit event for every decision, allow or deny.
     let event = AuditEvent {
-        subject: subject.to_owned(),
+        subject: subject.clone(),
         action: action.to_owned(),
-        resource: resource_id.to_owned(),
+        resource: resource_id.clone(),
         result: result.clone(),
         timestamp: now_utc(),
     };
@@ -588,20 +650,22 @@ pub fn mint_capability_for_id<P: Permission, R: Resource>(
 #[must_use = "capability minting can fail and the returned proof should be used"]
 pub async fn mint_capability_for_id_async<P: Permission, R: Resource>(
     engine: &dyn PolicyEngine,
-    subject: &str,
-    resource_id: &str,
+    subject: impl Into<SubjectId>,
+    resource_id: impl Into<ResourceId>,
     options: &MintOptions,
 ) -> Result<Capability<P, R>, CapabilityError> {
+    let subject = subject.into();
+    let resource_id = resource_id.into();
     let action = P::name();
 
     let result = engine
-        .check_with_context_async(subject, action, resource_id, &options.context)
+        .check_with_context_async(&subject, action, &resource_id, &options.context)
         .await;
 
     let event = AuditEvent {
-        subject: subject.to_owned(),
+        subject: subject.clone(),
         action: action.to_owned(),
-        resource: resource_id.to_owned(),
+        resource: resource_id.clone(),
         result: result.clone(),
         timestamp: now_utc(),
     };
@@ -632,15 +696,15 @@ pub struct FallbackEngine<P: PolicyEngine> {
 }
 
 impl<P: PolicyEngine> PolicyEngine for FallbackEngine<P> {
-    fn check(&self, subject: &str, action: &str, resource: &str) -> PolicyResult {
+    fn check(&self, subject: &SubjectId, action: &str, resource: &ResourceId) -> PolicyResult {
         self.check_with_context(subject, action, resource, &RequestContext::default())
     }
 
     fn check_with_context(
         &self,
-        subject: &str,
+        subject: &SubjectId,
         action: &str,
-        resource: &str,
+        resource: &ResourceId,
         ctx: &RequestContext,
     ) -> PolicyResult {
         match self
@@ -656,9 +720,9 @@ impl<P: PolicyEngine> PolicyEngine for FallbackEngine<P> {
 
     fn check_with_context_async<'a>(
         &'a self,
-        subject: &'a str,
+        subject: &'a SubjectId,
         action: &'a str,
-        resource: &'a str,
+        resource: &'a ResourceId,
         ctx: &'a RequestContext,
     ) -> PolicyFuture<'a> {
         Box::pin(async move {
@@ -689,29 +753,29 @@ mod tests {
 
     struct AllowAll;
     impl PolicyEngine for AllowAll {
-        fn check(&self, _: &str, _: &str, _: &str) -> PolicyResult {
+        fn check(&self, _: &SubjectId, _: &str, _: &ResourceId) -> PolicyResult {
             PolicyResult::Allow
         }
     }
 
     struct DenyAll;
     impl PolicyEngine for DenyAll {
-        fn check(&self, _: &str, _: &str, _: &str) -> PolicyResult {
+        fn check(&self, _: &SubjectId, _: &str, _: &ResourceId) -> PolicyResult {
             PolicyResult::Deny("DenyAll engine".into())
         }
     }
 
     struct AsyncAllowOnly;
     impl PolicyEngine for AsyncAllowOnly {
-        fn check(&self, _: &str, _: &str, _: &str) -> PolicyResult {
+        fn check(&self, _: &SubjectId, _: &str, _: &ResourceId) -> PolicyResult {
             PolicyResult::Deny("sync path should not be used".into())
         }
 
         fn check_with_context_async<'a>(
             &'a self,
+            _: &'a SubjectId,
             _: &'a str,
-            _: &'a str,
-            _: &'a str,
+            _: &'a ResourceId,
             _: &'a RequestContext,
         ) -> PolicyFuture<'a> {
             Box::pin(async { PolicyResult::Allow })
@@ -846,9 +910,9 @@ mod tests {
     #[test]
     fn audit_timestamp_is_typed_and_formats_as_rfc3339() {
         let event = AuditEvent {
-            subject: "agent:test".to_owned(),
+            subject: SubjectId::from("agent:test"),
             action: "read".to_owned(),
-            resource: "reports/q1".to_owned(),
+            resource: ResourceId::from("reports/q1"),
             result: PolicyResult::Allow,
             timestamp: Utc::now(),
         };
@@ -874,15 +938,15 @@ mod tests {
     fn mint_with_request_context_passes_context_to_engine() {
         struct PurposeEngine;
         impl PolicyEngine for PurposeEngine {
-            fn check(&self, _: &str, _: &str, _: &str) -> PolicyResult {
+            fn check(&self, _: &SubjectId, _: &str, _: &ResourceId) -> PolicyResult {
                 PolicyResult::Deny("missing context".into())
             }
 
             fn check_with_context(
                 &self,
+                _: &SubjectId,
                 _: &str,
-                _: &str,
-                _: &str,
+                _: &ResourceId,
                 ctx: &RequestContext,
             ) -> PolicyResult {
                 if ctx.purpose.as_deref() == Some("analytics") {
@@ -909,13 +973,17 @@ mod tests {
     fn composed_engine_falls_back() {
         struct DelegateAlways;
         impl PolicyEngine for DelegateAlways {
-            fn check(&self, _: &str, _: &str, _: &str) -> PolicyResult {
+            fn check(&self, _: &SubjectId, _: &str, _: &ResourceId) -> PolicyResult {
                 PolicyResult::delegate("test", "fallback")
             }
         }
 
         let engine = DelegateAlways.with_fallback(Arc::new(AllowAll));
-        let result = engine.check("agent:x", "read", "reports/q1");
+        let result = engine.check(
+            &SubjectId::from("agent:x"),
+            "read",
+            &ResourceId::from("reports/q1"),
+        );
         assert_eq!(result, PolicyResult::Allow);
     }
 }

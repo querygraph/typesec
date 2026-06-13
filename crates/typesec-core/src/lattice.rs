@@ -37,7 +37,7 @@ use std::sync::Arc;
 use tracing::{debug, info};
 
 use crate::{
-    Permission, Resource,
+    Permission, Resource, ResourceId, SubjectId,
     capability::Capability,
     permissions::{
         AiCanExfiltrate, AiCanInfer, AiCanTrain, CanDeclassify, CanDelegate, CanDelete, CanRead,
@@ -182,18 +182,18 @@ impl LatticeEngine {
 }
 
 impl PolicyEngine for LatticeEngine {
-    fn check(&self, subject: &str, action: &str, resource: &str) -> PolicyResult {
+    fn check(&self, subject: &SubjectId, action: &str, resource: &ResourceId) -> PolicyResult {
         self.check_with_context(subject, action, resource, &RequestContext::default())
     }
 
     fn check_with_context(
         &self,
-        subject: &str,
+        subject: &SubjectId,
         action: &str,
-        resource: &str,
+        resource: &ResourceId,
         ctx: &RequestContext,
     ) -> PolicyResult {
-        debug!(subject, action, resource, "lattice engine check");
+        debug!(subject = %subject, action, resource = %resource, "lattice engine check");
 
         // First try the direct request.
         match self
@@ -205,8 +205,8 @@ impl PolicyEngine for LatticeEngine {
                 // Try every permission that implies `action` in the lattice.
                 for higher in implied_by(action) {
                     debug!(
-                        subject,
-                        action, higher, resource, "testing lattice promotion"
+                        subject = %subject,
+                        action, higher, resource = %resource, "testing lattice promotion"
                     );
                     if self
                         .inner
@@ -214,10 +214,10 @@ impl PolicyEngine for LatticeEngine {
                         == PolicyResult::Allow
                     {
                         info!(
-                            subject,
+                            subject = %subject,
                             action,
                             via = higher,
-                            resource,
+                            resource = %resource,
                             lattice_promotion = true,
                             "access granted via lattice promotion"
                         );
@@ -270,7 +270,7 @@ mod tests {
         resource: &'static str,
     }
     impl PolicyEngine for GrantOnly {
-        fn check(&self, subject: &str, action: &str, resource: &str) -> PolicyResult {
+        fn check(&self, subject: &SubjectId, action: &str, resource: &ResourceId) -> PolicyResult {
             if subject == self.subject && action == self.action && resource == self.resource {
                 PolicyResult::Allow
             } else {
@@ -347,7 +347,11 @@ mod tests {
 
         // Direct read → denied by inner
         // Lattice: implied_by("read") includes "write" → inner.check("write") → Allow → promote
-        let result = engine.check("agent:test", "read", "reports/q1");
+        let result = engine.check(
+            &SubjectId::from("agent:test"),
+            "read",
+            &ResourceId::from("reports/q1"),
+        );
         assert_eq!(
             result,
             PolicyResult::Allow,
@@ -366,7 +370,11 @@ mod tests {
         let engine = LatticeEngine::new(inner);
 
         // Request "write" — no permission in the lattice implies write from read.
-        let result = engine.check("agent:test", "write", "reports/q1");
+        let result = engine.check(
+            &SubjectId::from("agent:test"),
+            "write",
+            &ResourceId::from("reports/q1"),
+        );
         assert!(
             matches!(result, PolicyResult::Deny(_)),
             "should not be able to promote read→write"
@@ -381,7 +389,11 @@ mod tests {
             resource: "data",
         });
         let engine = LatticeEngine::new(inner);
-        let result = engine.check("agent:test", "read", "data");
+        let result = engine.check(
+            &SubjectId::from("agent:test"),
+            "read",
+            &ResourceId::from("data"),
+        );
         assert_eq!(result, PolicyResult::Allow);
     }
 

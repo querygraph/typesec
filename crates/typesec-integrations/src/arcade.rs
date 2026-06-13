@@ -6,7 +6,10 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::debug;
-use typesec_core::policy::{PolicyEngine, PolicyResult};
+use typesec_core::{
+    ResourceId, SubjectId,
+    policy::{PolicyEngine, PolicyResult},
+};
 
 use crate::http::{HttpClient, ReqwestHttpClient};
 
@@ -81,7 +84,9 @@ impl ArcadeToolAuthEngine {
 }
 
 impl PolicyEngine for ArcadeToolAuthEngine {
-    fn check(&self, subject: &str, action: &str, resource: &str) -> PolicyResult {
+    fn check(&self, subject: &SubjectId, action: &str, resource: &ResourceId) -> PolicyResult {
+        let subject = subject.as_str();
+        let resource = resource.as_str();
         debug!(subject, action, resource, "arcade tool authorization check");
 
         if action != "execute" && action != "read" && action != "write" {
@@ -131,6 +136,19 @@ mod tests {
     use crate::http::StaticHttpClient;
     use serde_json::json;
 
+    fn check(
+        engine: &ArcadeToolAuthEngine,
+        subject: &str,
+        action: &str,
+        resource: &str,
+    ) -> PolicyResult {
+        engine.check(
+            &SubjectId::from(subject),
+            action,
+            &ResourceId::from(resource),
+        )
+    }
+
     #[test]
     fn allows_completed_authorization() {
         let http = StaticHttpClient::new().with_response(
@@ -142,7 +160,7 @@ mod tests {
                 .with_tool_mapping("gmail/list", "Gmail.ListEmails");
 
         assert_eq!(
-            engine.check("user@example.com", "execute", "gmail/list"),
+            check(&engine, "user@example.com", "execute", "gmail/list"),
             PolicyResult::Allow
         );
     }
@@ -157,7 +175,7 @@ mod tests {
             ArcadeToolAuthEngine::with_http("arc_test", "https://api.arcade.test", Arc::new(http))
                 .with_tool_mapping("gmail/list", "Gmail.ListEmails");
 
-        let result = engine.check("user@example.com", "execute", "gmail/list");
+        let result = check(&engine, "user@example.com", "execute", "gmail/list");
         assert!(matches!(result, PolicyResult::Deny(reason) if reason.contains("authorize")));
     }
 }

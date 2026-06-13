@@ -13,7 +13,10 @@ use grust::prelude::{
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map as JsonMap, Value as JsonValue};
 use tracing::debug;
-use typesec_core::policy::{PolicyEngine, PolicyResult};
+use typesec_core::{
+    ResourceId, SubjectId,
+    policy::{PolicyEngine, PolicyResult},
+};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct GraphPolicyDocument {
@@ -500,7 +503,9 @@ impl GraphPolicyEngine {
 }
 
 impl PolicyEngine for GraphPolicyEngine {
-    fn check(&self, subject: &str, action: &str, resource: &str) -> PolicyResult {
+    fn check(&self, subject: &SubjectId, action: &str, resource: &ResourceId) -> PolicyResult {
+        let subject = subject.as_str();
+        let resource = resource.as_str();
         debug!(subject, action, resource, "graph policy check");
 
         let graph = &self.doc.graph_policy.graph;
@@ -849,10 +854,18 @@ graph_policy:
         GraphPolicyEngine::from_yaml(YAML).expect("graph policy should load")
     }
 
+    fn check(subject: &str, action: &str, resource: &str) -> PolicyResult {
+        engine().check(
+            &SubjectId::from(subject),
+            action,
+            &ResourceId::from(resource),
+        )
+    }
+
     #[test]
     fn role_can_write_non_executive_employee_node() {
         assert_eq!(
-            engine().check(
+            check(
                 "agent:hr-onboarding",
                 "write",
                 "employee/private/employee:nia"
@@ -864,7 +877,7 @@ graph_policy:
     #[test]
     fn role_cannot_write_executive_employee_node() {
         assert!(matches!(
-            engine().check(
+            check(
                 "agent:hr-onboarding",
                 "write",
                 "employee/private/employee:evelyn"
@@ -876,7 +889,7 @@ graph_policy:
     #[test]
     fn unknown_role_assignment_is_denied() {
         assert!(matches!(
-            engine().check(
+            check(
                 "agent:employee-nia",
                 "write",
                 "employee/private/employee:nia"
@@ -888,7 +901,7 @@ graph_policy:
     #[test]
     fn relationship_write_rejects_cycles() {
         assert!(matches!(
-            engine().check(
+            check(
                 "agent:hr-onboarding",
                 "write",
                 "relationship/reports_to/employee:evelyn/employee:nia"
@@ -900,7 +913,7 @@ graph_policy:
     #[test]
     fn relationship_write_allows_tree_extension() {
         assert_eq!(
-            engine().check(
+            check(
                 "agent:hr-onboarding",
                 "write",
                 "relationship/reports_to/employee:nia/employee:evelyn"

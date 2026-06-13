@@ -205,7 +205,7 @@ mod tests {
     use super::*;
     use std::sync::Arc;
     use typesec_core::{
-        CanExecute, CanRead,
+        CanExecute, CanRead, ResourceId, SubjectId,
         policy::{PolicyEngine, PolicyResult},
         resource::GenericResource,
         typestate::Credentials,
@@ -213,7 +213,7 @@ mod tests {
 
     struct AllowAll;
     impl PolicyEngine for AllowAll {
-        fn check(&self, _: &str, _: &str, _: &str) -> PolicyResult {
+        fn check(&self, _: &SubjectId, _: &str, _: &ResourceId) -> PolicyResult {
             PolicyResult::Allow
         }
     }

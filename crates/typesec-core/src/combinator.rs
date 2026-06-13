@@ -28,7 +28,10 @@ use std::sync::Arc;
 
 use tracing::debug;
 
-use crate::policy::{PolicyEngine, PolicyFuture, PolicyResult, RequestContext};
+use crate::{
+    ResourceId, SubjectId,
+    policy::{PolicyEngine, PolicyFuture, PolicyResult, RequestContext},
+};
 
 // ── CombineStrategy ──────────────────────────────────────────────────────────
 
@@ -80,21 +83,21 @@ impl ComposedEngine {
 }
 
 impl PolicyEngine for ComposedEngine {
-    fn check(&self, subject: &str, action: &str, resource: &str) -> PolicyResult {
+    fn check(&self, subject: &SubjectId, action: &str, resource: &ResourceId) -> PolicyResult {
         self.check_with_context(subject, action, resource, &RequestContext::default())
     }
 
     fn check_with_context(
         &self,
-        subject: &str,
+        subject: &SubjectId,
         action: &str,
-        resource: &str,
+        resource: &ResourceId,
         ctx: &RequestContext,
     ) -> PolicyResult {
         debug!(
-            subject,
+            subject = %subject,
             action,
-            resource,
+            resource = %resource,
             strategy = ?self.strategy,
             n_engines = self.engines.len(),
             "composed engine check"
@@ -118,9 +121,9 @@ impl PolicyEngine for ComposedEngine {
 
     fn check_with_context_async<'a>(
         &'a self,
-        subject: &'a str,
+        subject: &'a SubjectId,
         action: &'a str,
-        resource: &'a str,
+        resource: &'a ResourceId,
         ctx: &'a RequestContext,
     ) -> PolicyFuture<'a> {
         Box::pin(async move {
@@ -146,9 +149,9 @@ impl PolicyEngine for ComposedEngine {
 
 fn priority_order(
     engines: &[Arc<dyn PolicyEngine>],
-    subject: &str,
+    subject: &SubjectId,
     action: &str,
-    resource: &str,
+    resource: &ResourceId,
     ctx: &RequestContext,
 ) -> PolicyResult {
     for engine in engines {
@@ -162,9 +165,9 @@ fn priority_order(
 
 async fn priority_order_async(
     engines: &[Arc<dyn PolicyEngine>],
-    subject: &str,
+    subject: &SubjectId,
     action: &str,
-    resource: &str,
+    resource: &ResourceId,
     ctx: &RequestContext,
 ) -> PolicyResult {
     for engine in engines {
@@ -186,9 +189,9 @@ async fn priority_order_async(
 
 fn allow_if_all(
     engines: &[Arc<dyn PolicyEngine>],
-    subject: &str,
+    subject: &SubjectId,
     action: &str,
-    resource: &str,
+    resource: &ResourceId,
     ctx: &RequestContext,
 ) -> PolicyResult {
     let mut any_definitive = false;
@@ -219,9 +222,9 @@ fn allow_if_all(
 
 async fn allow_if_all_async(
     engines: &[Arc<dyn PolicyEngine>],
-    subject: &str,
+    subject: &SubjectId,
     action: &str,
-    resource: &str,
+    resource: &ResourceId,
     ctx: &RequestContext,
 ) -> PolicyResult {
     let mut any_definitive = false;
@@ -258,9 +261,9 @@ async fn allow_if_all_async(
 
 fn allow_if_any(
     engines: &[Arc<dyn PolicyEngine>],
-    subject: &str,
+    subject: &SubjectId,
     action: &str,
-    resource: &str,
+    resource: &ResourceId,
     ctx: &RequestContext,
 ) -> PolicyResult {
     let mut last_deny: Option<PolicyResult> = None;
@@ -280,9 +283,9 @@ fn allow_if_any(
 
 async fn allow_if_any_async(
     engines: &[Arc<dyn PolicyEngine>],
-    subject: &str,
+    subject: &SubjectId,
     action: &str,
-    resource: &str,
+    resource: &ResourceId,
     ctx: &RequestContext,
 ) -> PolicyResult {
     let mut last_deny: Option<PolicyResult> = None;
@@ -310,9 +313,9 @@ async fn allow_if_any_async(
 
 fn deny_overrides(
     engines: &[Arc<dyn PolicyEngine>],
-    subject: &str,
+    subject: &SubjectId,
     action: &str,
-    resource: &str,
+    resource: &ResourceId,
     ctx: &RequestContext,
 ) -> PolicyResult {
     let mut any_allow = false;
@@ -343,9 +346,9 @@ fn deny_overrides(
 
 async fn deny_overrides_async(
     engines: &[Arc<dyn PolicyEngine>],
-    subject: &str,
+    subject: &SubjectId,
     action: &str,
-    resource: &str,
+    resource: &ResourceId,
     ctx: &RequestContext,
 ) -> PolicyResult {
     let mut any_allow = false;
@@ -433,10 +436,18 @@ mod tests {
     use crate::policy::PolicyResult;
     use std::sync::Arc;
 
+    fn subject() -> SubjectId {
+        SubjectId::from("s")
+    }
+
+    fn resource() -> ResourceId {
+        ResourceId::from("r")
+    }
+
     fn allow() -> Arc<dyn PolicyEngine> {
         struct A;
         impl PolicyEngine for A {
-            fn check(&self, _: &str, _: &str, _: &str) -> PolicyResult {
+            fn check(&self, _: &SubjectId, _: &str, _: &ResourceId) -> PolicyResult {
                 PolicyResult::Allow
             }
         }
@@ -446,7 +457,7 @@ mod tests {
     fn deny(msg: &'static str) -> Arc<dyn PolicyEngine> {
         struct D(&'static str);
         impl PolicyEngine for D {
-            fn check(&self, _: &str, _: &str, _: &str) -> PolicyResult {
+            fn check(&self, _: &SubjectId, _: &str, _: &ResourceId) -> PolicyResult {
                 PolicyResult::Deny(self.0.into())
             }
         }
@@ -456,7 +467,7 @@ mod tests {
     fn delegate() -> Arc<dyn PolicyEngine> {
         struct G;
         impl PolicyEngine for G {
-            fn check(&self, _: &str, _: &str, _: &str) -> PolicyResult {
+            fn check(&self, _: &SubjectId, _: &str, _: &ResourceId) -> PolicyResult {
                 PolicyResult::delegate("test", "abstain")
             }
         }
@@ -472,7 +483,7 @@ mod tests {
             .add_engine(deny("second"))
             .strategy(CombineStrategy::PriorityOrder)
             .build();
-        assert_eq!(e.check("s", "a", "r"), PolicyResult::Allow);
+        assert_eq!(e.check(&subject(), "a", &resource()), PolicyResult::Allow);
     }
 
     #[test]
@@ -482,7 +493,7 @@ mod tests {
             .add_engine(allow())
             .strategy(CombineStrategy::PriorityOrder)
             .build();
-        assert_eq!(e.check("s", "a", "r"), PolicyResult::Allow);
+        assert_eq!(e.check(&subject(), "a", &resource()), PolicyResult::Allow);
     }
 
     #[test]
@@ -492,7 +503,10 @@ mod tests {
             .add_engine(delegate())
             .strategy(CombineStrategy::PriorityOrder)
             .build();
-        assert!(matches!(e.check("s", "a", "r"), PolicyResult::Delegate(_)));
+        assert!(matches!(
+            e.check(&subject(), "a", &resource()),
+            PolicyResult::Delegate(_)
+        ));
     }
 
     // ── AllowIfAll ────────────────────────────────────────────────────────────
@@ -504,7 +518,7 @@ mod tests {
             .add_engine(allow())
             .strategy(CombineStrategy::AllowIfAll)
             .build();
-        assert_eq!(e.check("s", "a", "r"), PolicyResult::Allow);
+        assert_eq!(e.check(&subject(), "a", &resource()), PolicyResult::Allow);
     }
 
     #[test]
@@ -514,7 +528,10 @@ mod tests {
             .add_engine(deny("no"))
             .strategy(CombineStrategy::AllowIfAll)
             .build();
-        assert!(matches!(e.check("s", "a", "r"), PolicyResult::Deny(_)));
+        assert!(matches!(
+            e.check(&subject(), "a", &resource()),
+            PolicyResult::Deny(_)
+        ));
     }
 
     #[test]
@@ -524,7 +541,7 @@ mod tests {
             .add_engine(deny("second"))
             .strategy(CombineStrategy::AllowIfAll)
             .build();
-        let result = e.check("s", "a", "r");
+        let result = e.check(&subject(), "a", &resource());
 
         assert!(
             matches!(result, PolicyResult::Deny(reason) if reason.contains("first") && reason.contains("second"))
@@ -540,7 +557,7 @@ mod tests {
             .add_engine(allow())
             .strategy(CombineStrategy::AllowIfAll)
             .build();
-        assert_eq!(e.check("s", "a", "r"), PolicyResult::Allow);
+        assert_eq!(e.check(&subject(), "a", &resource()), PolicyResult::Allow);
     }
 
     // ── AllowIfAny ────────────────────────────────────────────────────────────
@@ -552,7 +569,7 @@ mod tests {
             .add_engine(allow())
             .strategy(CombineStrategy::AllowIfAny)
             .build();
-        assert_eq!(e.check("s", "a", "r"), PolicyResult::Allow);
+        assert_eq!(e.check(&subject(), "a", &resource()), PolicyResult::Allow);
     }
 
     #[test]
@@ -562,7 +579,10 @@ mod tests {
             .add_engine(deny("two"))
             .strategy(CombineStrategy::AllowIfAny)
             .build();
-        assert!(matches!(e.check("s", "a", "r"), PolicyResult::Deny(_)));
+        assert!(matches!(
+            e.check(&subject(), "a", &resource()),
+            PolicyResult::Deny(_)
+        ));
     }
 
     // ── DenyOverrides ─────────────────────────────────────────────────────────
@@ -574,7 +594,10 @@ mod tests {
             .add_engine(deny("prohibited"))
             .strategy(CombineStrategy::DenyOverrides)
             .build();
-        assert!(matches!(e.check("s", "a", "r"), PolicyResult::Deny(_)));
+        assert!(matches!(
+            e.check(&subject(), "a", &resource()),
+            PolicyResult::Deny(_)
+        ));
     }
 
     #[test]
@@ -584,7 +607,7 @@ mod tests {
             .add_engine(delegate())
             .strategy(CombineStrategy::DenyOverrides)
             .build();
-        assert_eq!(e.check("s", "a", "r"), PolicyResult::Allow);
+        assert_eq!(e.check(&subject(), "a", &resource()), PolicyResult::Allow);
     }
 
     #[test]
@@ -593,6 +616,9 @@ mod tests {
             .add_engine(delegate())
             .strategy(CombineStrategy::DenyOverrides)
             .build();
-        assert!(matches!(e.check("s", "a", "r"), PolicyResult::Delegate(_)));
+        assert!(matches!(
+            e.check(&subject(), "a", &resource()),
+            PolicyResult::Delegate(_)
+        ));
     }
 }

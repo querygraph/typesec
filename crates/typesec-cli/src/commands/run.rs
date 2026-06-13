@@ -5,7 +5,7 @@ use clap::Args;
 use serde::Deserialize;
 use std::{path::PathBuf, sync::Arc};
 use typesec_agent::SecureAgent;
-use typesec_core::{Credentials, RequestContext, policy::PolicyResult};
+use typesec_core::{Credentials, RequestContext, ResourceId, SubjectId, policy::PolicyResult};
 
 #[derive(Args)]
 pub struct RunArgs {
@@ -263,7 +263,9 @@ async fn simulate_task(
     println!("Requesting: action='{action}' on '{resource_id}'");
 
     let engine = agent.engine();
-    let result = engine.check_with_context(agent.subject(), action, resource_id, context);
+    let subject = SubjectId::from(agent.subject());
+    let resource = ResourceId::from(resource_id);
+    let result = engine.check_with_context(&subject, action, &resource, context);
 
     match &result {
         PolicyResult::Allow => {

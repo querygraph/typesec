@@ -1,5 +1,5 @@
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
-use typesec_core::PolicyEngine;
+use typesec_core::{PolicyEngine, ResourceId, SubjectId};
 use typesec_rbac::RbacEngine;
 
 const HIT_POLICY: &str = r#"
@@ -26,14 +26,16 @@ fn miss_policy() -> String {
 
 fn bench_rbac_check_hit(c: &mut Criterion) {
     let engine = RbacEngine::from_yaml(HIT_POLICY).expect("policy");
+    let subject = SubjectId::from("agent:bench");
+    let resource = ResourceId::from("reports/q1");
 
     c.bench_function("bench_rbac_check_hit", |b| {
         b.iter(|| {
             for _ in 0..1_000 {
                 let _ = black_box(engine.check(
-                    black_box("agent:bench"),
+                    black_box(&subject),
                     black_box("read"),
-                    black_box("reports/q1"),
+                    black_box(&resource),
                 ));
             }
         })
@@ -43,14 +45,16 @@ fn bench_rbac_check_hit(c: &mut Criterion) {
 fn bench_rbac_check_miss(c: &mut Criterion) {
     let yaml = miss_policy();
     let engine = RbacEngine::from_yaml(&yaml).expect("policy");
+    let subject = SubjectId::from("agent:bench");
+    let resource = ResourceId::from("reports/q1");
 
     c.bench_function("bench_rbac_check_miss", |b| {
         b.iter(|| {
             for _ in 0..1_000 {
                 let _ = black_box(engine.check(
-                    black_box("agent:bench"),
+                    black_box(&subject),
                     black_box("write"),
-                    black_box("reports/q1"),
+                    black_box(&resource),
                 ));
             }
         })

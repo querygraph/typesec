@@ -3,13 +3,14 @@ use std::sync::Arc;
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use typesec_core::{
     CanRead, CanWrite, Capability, CombineStrategy, ComposedEngine, LatticeEngine, Permission,
-    PolicyEngine, PolicyResult, Resource, policy::mint_capability, resource::GenericResource,
+    PolicyEngine, PolicyResult, Resource, ResourceId, SubjectId, policy::mint_capability,
+    resource::GenericResource,
 };
 
 struct AllowAll;
 
 impl PolicyEngine for AllowAll {
-    fn check(&self, _: &str, _: &str, _: &str) -> PolicyResult {
+    fn check(&self, _: &SubjectId, _: &str, _: &ResourceId) -> PolicyResult {
         PolicyResult::Allow
     }
 }
@@ -17,7 +18,7 @@ impl PolicyEngine for AllowAll {
 struct WriteOnly;
 
 impl PolicyEngine for WriteOnly {
-    fn check(&self, _: &str, action: &str, _: &str) -> PolicyResult {
+    fn check(&self, _: &SubjectId, action: &str, _: &ResourceId) -> PolicyResult {
         if action == "write" {
             PolicyResult::Allow
         } else {
@@ -29,7 +30,7 @@ impl PolicyEngine for WriteOnly {
 struct DenyAll;
 
 impl PolicyEngine for DenyAll {
-    fn check(&self, _: &str, _: &str, _: &str) -> PolicyResult {
+    fn check(&self, _: &SubjectId, _: &str, _: &ResourceId) -> PolicyResult {
         PolicyResult::Deny("denied".to_owned())
     }
 }
@@ -53,14 +54,16 @@ fn bench_mint_capability_allow(c: &mut Criterion) {
 fn bench_lattice_promotion(c: &mut Criterion) {
     let engine = LatticeEngine::new(Arc::new(WriteOnly));
     let resource = GenericResource::new("reports/q1", "report");
+    let subject = SubjectId::from("agent:bench");
+    let resource_id = ResourceId::from(resource.resource_id());
 
     c.bench_function("bench_lattice_promotion", |b| {
         b.iter(|| {
             for _ in 0..1_000 {
                 let _ = black_box(engine.check(
-                    black_box("agent:bench"),
+                    black_box(&subject),
                     black_box(CanRead::name()),
-                    black_box(resource.resource_id()),
+                    black_box(&resource_id),
                 ));
             }
         })
@@ -73,14 +76,16 @@ fn bench_composed_engine_deny_overrides(c: &mut Criterion) {
         CombineStrategy::DenyOverrides,
     );
     let resource = GenericResource::new("reports/q1", "report");
+    let subject = SubjectId::from("agent:bench");
+    let resource_id = ResourceId::from(resource.resource_id());
 
     c.bench_function("bench_composed_engine_deny_overrides", |b| {
         b.iter(|| {
             for _ in 0..1_000 {
                 let _ = black_box(engine.check(
-                    black_box("agent:bench"),
+                    black_box(&subject),
                     black_box(CanWrite::name()),
-                    black_box(resource.resource_id()),
+                    black_box(&resource_id),
                 ));
             }
         })

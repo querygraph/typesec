@@ -2,7 +2,10 @@
 
 use pyo3::exceptions::{PyPermissionError, PyValueError};
 use pyo3::prelude::*;
-use typesec_core::policy::{PolicyEngine, PolicyResult, RequestContext};
+use typesec_core::{
+    ResourceId, SubjectId,
+    policy::{PolicyEngine, PolicyResult, RequestContext},
+};
 
 #[derive(Clone, Copy)]
 enum PolicyFormat {
@@ -183,13 +186,15 @@ impl CompiledPolicyEngine {
         resource: &str,
         purpose: Option<&str>,
     ) -> PolicyResult {
+        let subject = SubjectId::from(subject);
+        let resource = ResourceId::from(resource);
         match self {
-            Self::Rbac(engine) => engine.check(subject, action, resource),
+            Self::Rbac(engine) => engine.check(&subject, action, &resource),
             Self::Odrl(engine) => {
                 let ctx = request_context(purpose);
-                PolicyEngine::check_with_context(engine, subject, action, resource, &ctx)
+                PolicyEngine::check_with_context(engine, &subject, action, &resource, &ctx)
             }
-            Self::Graph(engine) => engine.check(subject, action, resource),
+            Self::Graph(engine) => engine.check(&subject, action, &resource),
         }
     }
 }
