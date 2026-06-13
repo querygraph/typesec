@@ -83,6 +83,13 @@ pub struct CanDelegate;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CanReadSensitive;
 
+/// Permission to read *internal* resources.
+///
+/// Internal data is not public, but does not require the higher authority
+/// needed for sensitive or secret data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct CanReadInternal;
+
 /// Permission to write *sensitive* resources.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CanWriteSensitive;
@@ -135,6 +142,7 @@ impl_permission! {
     CanDelete        => "delete",
     CanExecute       => "execute",
     CanDelegate      => "delegate",
+    CanReadInternal   => "read_internal",
     CanReadSensitive  => "read_sensitive",
     CanWriteSensitive => "write_sensitive",
     CanDeclassify     => "declassify",
@@ -150,6 +158,7 @@ mod tests {
     #[test]
     fn permission_names_are_correct() {
         assert_eq!(CanRead::name(), "read");
+        assert_eq!(CanReadInternal::name(), "read_internal");
         assert_eq!(CanWrite::name(), "write");
         assert_eq!(AiCanExfiltrate::name(), "ai:exfiltrate");
     }

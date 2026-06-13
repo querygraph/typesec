@@ -42,5 +42,6 @@ pub use tool::{ProtectedTool, ToolFuture, ToolSpec};
 
 // Re-export core types for convenience.
 pub use typesec_core::{
-    CanDelete, CanExecute, CanRead, CanWrite, Capability, Credentials, Permission, Resource,
+    CanDelete, CanExecute, CanRead, CanReadInternal, CanWrite, Capability, Credentials, Permission,
+    Resource,
 };

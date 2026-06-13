@@ -9,7 +9,7 @@ use std::marker::PhantomData;
 
 use crate::{
     Capability, Resource,
-    permissions::{CanDeclassify, CanReadSensitive},
+    permissions::{CanDeclassify, CanReadInternal, CanReadSensitive},
 };
 
 /// Private sealing for built-in privacy labels.
@@ -275,12 +275,29 @@ impl<T, R: Resource> SecureValue<Public, T, R> {
     }
 }
 
+impl<T, R: Resource> SecureValue<Internal, T, R> {
+    /// Reveal internal data with internal-read authority.
+    ///
+    /// This is intentionally weaker than [`reveal`][SecureValue::reveal]:
+    /// internal data does not require `CanReadSensitive`, while sensitive and
+    /// secret data still do. The capability must cover the same resource id.
+    #[must_use = "revealing internal data can fail and returns the protected value"]
+    pub fn reveal_internal(
+        self,
+        capability: &Capability<CanReadInternal, R>,
+    ) -> Result<T, SecureAccessError> {
+        capability.ensure_active()?;
+        self.check_capability_resource(capability.resource_id())?;
+        Ok(self.value)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
         capability::{Capability, DEFAULT_CAPABILITY_TTL},
-        permissions::{CanDeclassify, CanReadSensitive},
+        permissions::{CanDeclassify, CanReadInternal, CanReadSensitive},
         resource::GenericResource,
     };
     use std::time::{Duration, SystemTime};
@@ -352,6 +369,20 @@ mod tests {
     }
 
     #[test]
+    fn internal_values_reveal_with_internal_capability() {
+        let resource = GenericResource::new("memo/1", "memo");
+        let internal: SecureValue<Internal, &str, GenericResource> =
+            SecureValue::protect("draft roadmap", &resource);
+        let cap: Capability<CanReadInternal, GenericResource> =
+            Capability::new_unchecked("agent:test", "memo/1");
+
+        assert_eq!(
+            internal.reveal_internal(&cap).expect("matching resource"),
+            "draft roadmap"
+        );
+    }
+
+    #[test]
     fn declassify_makes_public_value() {
         let resource = GenericResource::new("metric/1", "metric");
         let sensitive: SecureValue<Sensitive, usize, GenericResource> =
@@ -375,6 +406,20 @@ mod tests {
 
         assert!(matches!(
             secret.reveal(&cap),
+            Err(SecureAccessError::ResourceMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn reveal_internal_rejects_capability_for_other_resource_instance() {
+        let resource = GenericResource::new("memo/1", "memo");
+        let internal: SecureValue<Internal, &str, GenericResource> =
+            SecureValue::protect("draft roadmap", &resource);
+        let cap: Capability<CanReadInternal, GenericResource> =
+            Capability::new_unchecked("agent:test", "memo/2");
+
+        assert!(matches!(
+            internal.reveal_internal(&cap),
             Err(SecureAccessError::ResourceMismatch { .. })
         ));
     }
@@ -417,6 +462,23 @@ mod tests {
 
         assert!(matches!(
             secret.reveal(&cap),
+            Err(SecureAccessError::Capability(_))
+        ));
+    }
+
+    #[test]
+    fn reveal_internal_rejects_expired_capability() {
+        let resource = GenericResource::new("memo/1", "memo");
+        let internal: SecureValue<Internal, &str, GenericResource> =
+            SecureValue::protect("draft roadmap", &resource);
+        let issued_at = SystemTime::now()
+            .checked_sub(DEFAULT_CAPABILITY_TTL + Duration::from_secs(1))
+            .expect("time subtraction");
+        let cap: Capability<CanReadInternal, GenericResource> =
+            Capability::new_with_issued_at("agent:test", "memo/1", issued_at);
+
+        assert!(matches!(
+            internal.reveal_internal(&cap),
             Err(SecureAccessError::Capability(_))
         ));
     }

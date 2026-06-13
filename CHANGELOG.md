@@ -16,6 +16,9 @@ by release version, then by the date the logical change landed.
 - Added async policy and audit surfaces plus async capability-minting helpers;
   `SecureAgent::request_capability` now awaits that path directly instead of
   dispatching every policy check through Tokio's blocking pool.
+- Added `CanReadInternal`, a lattice relationship below sensitive-read, and
+  `SecureValue<Internal>::reveal_internal` so internal data has a least-privilege
+  reveal path distinct from sensitive and secret data.
 - Hardened runtime security internals with typed UTC audit timestamps,
   source-preserving engine errors, zeroizing bearer tokens and credentials, and
   Python free-function documentation that steers repeated checks to

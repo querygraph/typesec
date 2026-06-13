@@ -129,7 +129,8 @@ and they cannot call the unchecked constructor. They must ask a policy engine.
 
 Second, permission types are sealed. The `Permission` trait is implemented by
 Typesec's own marker types, such as `CanRead`, `CanWrite`, `CanDelete`,
-`CanReadSensitive`, `AiCanInfer`, `AiCanTrain`, and `AiCanExfiltrate`.
+`CanReadInternal`, `CanReadSensitive`, `AiCanInfer`, `AiCanTrain`, and
+`AiCanExfiltrate`.
 External crates cannot invent `CanDoAnything` and use it as a back door.
 
 Third, resource types implement a `Resource` trait. A resource exposes a stable
@@ -370,8 +371,9 @@ code a first-class way to keep sensitive data opaque while still doing useful
 work with it.
 
 Extraction is limited to explicit release paths. `SecureValue<Public, T, R>` can
-be unwrapped with `into_public`. Any protected label can be revealed with a
-`Capability<CanReadSensitive, R>`. To lower the label, code must hold:
+be unwrapped with `into_public`. `SecureValue<Internal, T, R>` can be revealed
+with a `Capability<CanReadInternal, R>`, while sensitive and secret data still
+require `Capability<CanReadSensitive, R>`. To lower the label, code must hold:
 
 ```rust
 Capability<CanDeclassify, R>

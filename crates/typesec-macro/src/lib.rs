@@ -54,6 +54,7 @@ const KNOWN_PERMISSIONS: &[&str] = &[
     "delete",
     "execute",
     "delegate",
+    "read_internal",
     "read_sensitive",
     "write_sensitive",
     "declassify",

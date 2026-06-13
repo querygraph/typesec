@@ -55,7 +55,7 @@ pub use combinator::{CombineStrategy, ComposedEngine, PolicyEngineBuilder};
 pub use lattice::{Implies, LatticeEngine};
 pub use permissions::{
     AiCanExfiltrate, AiCanInfer, AiCanTrain, CanDeclassify, CanDelegate, CanDelete, CanExecute,
-    CanRead, CanReadSensitive, CanWrite, CanWriteSensitive, Permission,
+    CanRead, CanReadInternal, CanReadSensitive, CanWrite, CanWriteSensitive, Permission,
 };
 pub use policy::{
     AsyncPolicyEngine, AuditEvent, AuditFuture, AuditSink, AuditTimestamp, DelegationReason,

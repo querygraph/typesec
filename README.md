@@ -63,8 +63,8 @@ typesec-python    ← PyO3 bindings for Rust-backed Python policy gates
 The foundation. Defines:
 
 - **`Permission`** — sealed marker trait. Implementations: `CanRead`, `CanWrite`,
-  `CanDelete`, `CanExecute`, `CanDelegate`, `CanReadSensitive`, `CanWriteSensitive`,
-  `AiCanInfer`, `AiCanTrain`, `AiCanExfiltrate`.
+  `CanDelete`, `CanExecute`, `CanDelegate`, `CanReadInternal`, `CanReadSensitive`,
+  `CanWriteSensitive`, `AiCanInfer`, `AiCanTrain`, `AiCanExfiltrate`.
 
 - **`Capability<P, R>`** — unforgeable proof token. `P` is a permission type, `R` is a
   resource type. Holding one means a `PolicyEngine` approved the access.

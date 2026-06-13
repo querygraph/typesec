@@ -80,6 +80,9 @@ pub enum RuleAction {
     Execute,
     /// Delegation.
     Delegate,
+    /// Read internal data.
+    #[serde(rename = "read_internal")]
+    ReadInternal,
     /// Read sensitive data.
     #[serde(rename = "read_sensitive")]
     ReadSensitive,
@@ -108,6 +111,7 @@ impl RuleAction {
             RuleAction::Delete => "delete",
             RuleAction::Execute => "execute",
             RuleAction::Delegate => "delegate",
+            RuleAction::ReadInternal => "read_internal",
             RuleAction::ReadSensitive => "read_sensitive",
             RuleAction::WriteSensitive => "write_sensitive",
             RuleAction::AiInfer => "ai:infer",

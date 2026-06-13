@@ -9,9 +9,11 @@
 //! ## Lattice Structure
 //!
 //! ```text
-//! CanWriteSensitive ──► CanWrite ──► CanRead
-//!         │                          ▲
-//!         └──► CanReadSensitive ─────┘
+//! CanWriteSensitive ──► CanWrite ─────────────► CanRead
+//!         │                                      ▲
+//!         └──► CanReadSensitive ──► CanReadInternal
+//!                         │              │
+//!                         └──────────────┘
 //!
 //! CanDelete ──────────────────────────► CanRead
 //! CanDelegate ────────────────────────► CanRead
@@ -39,7 +41,7 @@ use crate::{
     capability::Capability,
     permissions::{
         AiCanExfiltrate, AiCanInfer, AiCanTrain, CanDeclassify, CanDelegate, CanDelete, CanRead,
-        CanReadSensitive, CanWrite, CanWriteSensitive,
+        CanReadInternal, CanReadSensitive, CanWrite, CanWriteSensitive,
     },
     policy::{PolicyEngine, PolicyResult, RequestContext},
 };
@@ -87,14 +89,19 @@ lattice! {
     CanDelete => CanRead,
     // CanDelegate → CanRead
     CanDelegate => CanRead,
-    // CanReadSensitive → CanRead
+    // CanReadInternal → CanRead
+    CanReadInternal => CanRead,
+    // CanReadSensitive → CanReadInternal, CanRead
+    CanReadSensitive => CanReadInternal,
     CanReadSensitive => CanRead,
-    // CanWriteSensitive → CanWrite, CanReadSensitive, CanRead
+    // CanWriteSensitive → CanWrite, CanReadSensitive, CanReadInternal, CanRead
     CanWriteSensitive => CanWrite,
     CanWriteSensitive => CanReadSensitive,
+    CanWriteSensitive => CanReadInternal,
     CanWriteSensitive => CanRead,
-    // CanDeclassify → CanReadSensitive, CanRead
+    // CanDeclassify → CanReadSensitive, CanReadInternal, CanRead
     CanDeclassify => CanReadSensitive,
+    CanDeclassify => CanReadInternal,
     CanDeclassify => CanRead,
     // AiCanTrain → AiCanInfer, CanRead
     AiCanTrain => AiCanInfer,
@@ -248,7 +255,7 @@ pub fn implication_pairs() -> impl Iterator<Item = (&'static str, &'static str)>
 mod tests {
     use super::*;
     use crate::{
-        permissions::{CanRead, CanWrite, CanWriteSensitive},
+        permissions::{CanRead, CanReadInternal, CanReadSensitive, CanWrite, CanWriteSensitive},
         policy::PolicyResult,
         resource::GenericResource,
     };
@@ -312,6 +319,18 @@ mod tests {
             "read"
         );
         assert_eq!(r_cap.subject(), "agent:admin");
+    }
+
+    #[test]
+    fn coerce_read_sensitive_to_read_internal() {
+        let sensitive_cap: Capability<CanReadSensitive, GenericResource> =
+            Capability::new_unchecked("agent:analyst", "internal/memo");
+        let internal_cap: Capability<CanReadInternal, GenericResource> = sensitive_cap.coerce();
+        assert_eq!(
+            Capability::<CanReadInternal, GenericResource>::permission_name(),
+            "read_internal"
+        );
+        assert_eq!(internal_cap.resource_id(), "internal/memo");
     }
 
     // ── LatticeEngine tests ────────────────────────────────────────────────────
