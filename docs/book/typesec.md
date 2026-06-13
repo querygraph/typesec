@@ -1242,8 +1242,15 @@ policy! {
     role Analyst {
         can [read, read_sensitive] on ["reports/*", "metrics/*"];
     }
+    role LeadAnalyst extends Analyst {
+        can [write] on ["reports/drafts/*"];
+    }
 }
 ```
+
+`extends` flattens inherited permissions and resource patterns at macro
+expansion time, matching the RBAC YAML model while keeping the generated `Role`
+impls as simple static slices.
 
 Macros are not the security core. The core is capabilities and policy-engine
 minting. The macros are there to make typed policy declarations less tedious

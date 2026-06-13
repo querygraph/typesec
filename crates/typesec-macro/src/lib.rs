@@ -36,8 +36,13 @@
 //!     role Analyst {
 //!         can [read, read_sensitive] on ["reports/*", "metrics/*"];
 //!     }
+//!     role LeadAnalyst extends Analyst {
+//!         can [write] on ["reports/drafts/*"];
+//!     }
 //! }
 //! ```
+
+use std::collections::HashMap;
 
 use proc_macro::TokenStream;
 use proc_macro2::Span;
@@ -201,8 +206,8 @@ fn derive_typesec_role_impl(input: DeriveInput) -> Result<proc_macro2::TokenStre
 ///     role Analyst {
 ///         can [read, read_sensitive] on ["reports/*"];
 ///     }
-///     role Engineer {
-///         can [read, write, execute] on ["code/*"];
+///     role Engineer extends Analyst {
+///         can [write, execute] on ["code/*"];
 ///     }
 /// }
 /// ```
@@ -223,8 +228,15 @@ fn policy_impl(input: proc_macro2::TokenStream) -> Result<proc_macro2::TokenStre
         punctuated::Punctuated,
     };
 
-    // Mini-DSL parser for `role Name { can [perms] on ["resources"]; }` blocks.
-    struct PolicyParser(Vec<(Ident, Vec<Ident>, Vec<LitStr>)>);
+    // Mini-DSL parser for `role Name [extends Parent] { can [perms] on ["resources"]; }` blocks.
+    struct RoleDef {
+        name: Ident,
+        parent: Option<Ident>,
+        perms: Vec<Ident>,
+        resources: Vec<LitStr>,
+    }
+
+    struct PolicyParser(Vec<RoleDef>);
 
     impl Parse for PolicyParser {
         fn parse(input: ParseStream) -> syn::Result<Self> {
@@ -239,6 +251,19 @@ fn policy_impl(input: proc_macro2::TokenStream) -> Result<proc_macro2::TokenStre
 
                 // Role name
                 let name: Ident = input.parse()?;
+
+                let parent = if input.peek(Ident) {
+                    let maybe_extends: Ident = input.parse()?;
+                    if maybe_extends != "extends" {
+                        return Err(syn::Error::new(
+                            maybe_extends.span(),
+                            "expected `extends` or `{`",
+                        ));
+                    }
+                    Some(input.parse()?)
+                } else {
+                    None
+                };
 
                 // `{ can [perms] on ["resources"]; }`
                 let content;
@@ -271,11 +296,12 @@ fn policy_impl(input: proc_macro2::TokenStream) -> Result<proc_macro2::TokenStre
                 // Optional semicolon
                 let _ = content.parse::<Token![;]>();
 
-                roles.push((
+                roles.push(RoleDef {
                     name,
-                    perms.into_iter().collect(),
-                    resources.into_iter().collect(),
-                ));
+                    parent,
+                    perms: perms.into_iter().collect(),
+                    resources: resources.into_iter().collect(),
+                });
             }
 
             Ok(PolicyParser(roles))
@@ -283,15 +309,74 @@ fn policy_impl(input: proc_macro2::TokenStream) -> Result<proc_macro2::TokenStre
     }
 
     let parsed: PolicyParser = syn::parse2(input)?;
+    let role_index: HashMap<String, usize> = parsed
+        .0
+        .iter()
+        .enumerate()
+        .map(|(idx, role)| (role.name.to_string(), idx))
+        .collect();
     let mut output = proc_macro2::TokenStream::new();
 
-    for (name, perms, resources) in parsed.0 {
-        let name_str = pascal_to_snake(&name.to_string());
-        for perm in &perms {
-            check_permission(&perm.to_string(), perm.span())?;
+    fn flatten_role(
+        idx: usize,
+        roles: &[RoleDef],
+        role_index: &HashMap<String, usize>,
+        visiting: &mut Vec<String>,
+    ) -> Result<(Vec<String>, Vec<LitStr>), syn::Error> {
+        let role = &roles[idx];
+        let role_name = role.name.to_string();
+        if visiting.contains(&role_name) {
+            return Err(syn::Error::new(
+                role.name.span(),
+                format!("circular role inheritance detected for `{role_name}`"),
+            ));
         }
-        let perm_strs: Vec<String> = perms.iter().map(|p| p.to_string()).collect();
-        let perm_lits: Vec<LitStr> = perm_strs
+
+        visiting.push(role_name);
+
+        let mut permissions = Vec::new();
+        let mut resources = Vec::new();
+
+        if let Some(parent) = &role.parent {
+            let parent_name = parent.to_string();
+            let parent_idx = role_index.get(&parent_name).ok_or_else(|| {
+                syn::Error::new(
+                    parent.span(),
+                    format!("role `{}` extends unknown role `{parent_name}`", role.name),
+                )
+            })?;
+            let (parent_permissions, parent_resources) =
+                flatten_role(*parent_idx, roles, role_index, visiting)?;
+            permissions.extend(parent_permissions);
+            resources.extend(parent_resources);
+        }
+
+        for perm in &role.perms {
+            let perm_name = perm.to_string();
+            check_permission(&perm_name, perm.span())?;
+            if !permissions.contains(&perm_name) {
+                permissions.push(perm_name);
+            }
+        }
+
+        for resource in &role.resources {
+            if !resources
+                .iter()
+                .any(|existing: &LitStr| existing.value() == resource.value())
+            {
+                resources.push(resource.clone());
+            }
+        }
+
+        visiting.pop();
+        Ok((permissions, resources))
+    }
+
+    for (idx, role) in parsed.0.iter().enumerate() {
+        let name = &role.name;
+        let name_str = pascal_to_snake(&name.to_string());
+        let (permissions, resources) = flatten_role(idx, &parsed.0, &role_index, &mut Vec::new())?;
+        let perm_lits: Vec<LitStr> = permissions
             .iter()
             .map(|s| LitStr::new(s, Span::call_site()))
             .collect();
@@ -315,7 +400,9 @@ fn policy_impl(input: proc_macro2::TokenStream) -> Result<proc_macro2::TokenStre
 
 #[cfg(test)]
 mod tests {
-    use super::pascal_to_snake;
+    use quote::quote;
+
+    use super::{pascal_to_snake, policy_impl};
 
     #[test]
     fn converts_pascal_case_role_names_to_snake_case() {
@@ -323,5 +410,32 @@ mod tests {
         assert_eq!(pascal_to_snake("AITrainer"), "ai_trainer");
         assert_eq!(pascal_to_snake("HTTPAuditLog"), "http_audit_log");
         assert_eq!(pascal_to_snake("Reader"), "reader");
+    }
+
+    #[test]
+    fn policy_macro_rejects_unknown_parent_role() {
+        let err = policy_impl(quote! {
+            role Writer extends Reader {
+                can [write] on ["docs/*"];
+            }
+        })
+        .expect_err("unknown parent should fail");
+
+        assert!(err.to_string().contains("unknown role `Reader`"));
+    }
+
+    #[test]
+    fn policy_macro_rejects_cyclic_inheritance() {
+        let err = policy_impl(quote! {
+            role Reader extends Writer {
+                can [read] on ["docs/*"];
+            }
+            role Writer extends Reader {
+                can [write] on ["docs/*"];
+            }
+        })
+        .expect_err("inheritance cycle should fail");
+
+        assert!(err.to_string().contains("circular role inheritance"));
     }
 }

@@ -10,6 +10,8 @@ by release version, then by the date the logical change landed.
 - Added per-capability revocation with `CapabilityId`,
   `CapabilityRevocationList`, and `MintOptions::with_revocation_list`, allowing
   one live proof to be revoked without bumping a shared revocation epoch.
+- Added `policy!` role inheritance with `role Child extends Parent`, flattening
+  inherited permissions and resource patterns during macro expansion.
 - Added RBAC wildcard subject assignments with compiled glob validation, typed
   ODRL constraint operands, prohibition-overridden ODRL audit events, and
   snake_case role names for multiword `policy!` roles.
