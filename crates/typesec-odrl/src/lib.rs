@@ -29,4 +29,6 @@ pub mod engine;
 pub mod model;
 
 pub use engine::OdrlEngine;
-pub use model::{OdrlConstraint, OdrlPolicy, OdrlRule, OdrlRuleType, RuleAction};
+pub use model::{
+    ConstraintOperand, OdrlConstraint, OdrlPolicy, OdrlRule, OdrlRuleType, RuleAction,
+};

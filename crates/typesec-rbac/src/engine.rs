@@ -19,6 +19,8 @@ use crate::model::RbacPolicy;
 pub struct RbacEngine {
     /// Subject → set of effective (permission, resource_pattern) pairs.
     subject_grants: HashMap<String, Vec<CompiledGrant>>,
+    /// Glob subject pattern → set of effective grants.
+    wildcard_subject_grants: Vec<(SubjectPattern, Vec<CompiledGrant>)>,
 }
 
 #[derive(Debug, Clone)]
@@ -46,6 +48,32 @@ enum ResourcePattern {
     /// `reports/*` matches `reports/q1` but not `reports/2024/q1` (use
     /// `reports/**` for that).
     Glob(Pattern),
+}
+
+#[derive(Debug, Clone)]
+enum SubjectPattern {
+    /// The literal `"*"` — matches every subject.
+    Any,
+    /// A compiled glob.
+    Glob(Pattern),
+}
+
+impl SubjectPattern {
+    fn compile(pattern: &str) -> Result<Self, String> {
+        if pattern == "*" {
+            return Ok(Self::Any);
+        }
+        Pattern::new(pattern)
+            .map(Self::Glob)
+            .map_err(|e| format!("invalid subject pattern '{pattern}': {e}"))
+    }
+
+    fn matches(&self, subject: &str) -> bool {
+        match self {
+            Self::Any => true,
+            Self::Glob(pattern) => pattern.matches(subject),
+        }
+    }
 }
 
 impl ResourcePattern {
@@ -86,6 +114,7 @@ impl RbacEngine {
         // Step 2: build subject → grants mapping, compiling patterns up front
         // so invalid globs fail the policy load instead of silently denying.
         let mut subject_grants: HashMap<String, Vec<CompiledGrant>> = HashMap::new();
+        let mut wildcard_subject_grants: Vec<(SubjectPattern, Vec<CompiledGrant>)> = Vec::new();
         for assignment in &policy.assignments {
             let mut all_grants: Vec<CompiledGrant> = Vec::new();
             for role_name in &assignment.roles {
@@ -102,13 +131,21 @@ impl RbacEngine {
                     }
                 }
             }
-            subject_grants
-                .entry(assignment.subject.clone())
-                .or_default()
-                .extend(all_grants);
+            if is_glob_pattern(&assignment.subject) {
+                wildcard_subject_grants
+                    .push((SubjectPattern::compile(&assignment.subject)?, all_grants));
+            } else {
+                subject_grants
+                    .entry(assignment.subject.clone())
+                    .or_default()
+                    .extend(all_grants);
+            }
         }
 
-        Ok(Self { subject_grants })
+        Ok(Self {
+            subject_grants,
+            wildcard_subject_grants,
+        })
     }
 
     /// Load an engine directly from a YAML string.
@@ -122,14 +159,16 @@ impl PolicyEngine for RbacEngine {
     fn check(&self, subject: &str, action: &str, resource: &str) -> PolicyResult {
         debug!(subject, action, resource, "rbac check");
 
-        let grants = match self.subject_grants.get(subject) {
-            Some(g) => g,
-            None => {
-                return PolicyResult::Deny(format!("no role assignments for subject '{subject}'"));
-            }
-        };
+        let exact_grants = self.subject_grants.get(subject).into_iter().flatten();
+        let wildcard_grants = self
+            .wildcard_subject_grants
+            .iter()
+            .filter(|(pattern, _)| pattern.matches(subject))
+            .flat_map(|(_, grants)| grants);
 
-        for grant in grants {
+        let mut matched_subject = false;
+        for grant in exact_grants.chain(wildcard_grants) {
+            matched_subject = true;
             if grant.permission == action {
                 for pattern in &grant.resource_patterns {
                     if pattern.matches(resource) {
@@ -139,10 +178,18 @@ impl PolicyEngine for RbacEngine {
             }
         }
 
+        if !matched_subject {
+            return PolicyResult::Deny(format!("no role assignments for subject '{subject}'"));
+        }
+
         PolicyResult::Deny(format!(
             "no rule grants '{subject}' permission '{action}' on '{resource}'"
         ))
     }
+}
+
+fn is_glob_pattern(value: &str) -> bool {
+    value.contains(['*', '?', '['])
 }
 
 /// Recursively flatten a role's permissions by resolving inheritance.
@@ -296,6 +343,76 @@ assignments:
             e.check("agent:ghost", "read", "reports/q1"),
             PolicyResult::Deny(_)
         ));
+    }
+
+    #[test]
+    fn wildcard_subject_assignment_matches_globbed_agents() {
+        let yaml = r#"
+roles:
+  - name: deployer
+    permissions: [execute]
+    resources: ["infra/*"]
+
+assignments:
+  - subject: "agent:deploy-*"
+    roles: [deployer]
+"#;
+        let e = RbacEngine::from_yaml(yaml).expect("engine build should succeed");
+        assert_eq!(
+            e.check("agent:deploy-prod", "execute", "infra/restart"),
+            PolicyResult::Allow
+        );
+        assert!(matches!(
+            e.check("agent:build-prod", "execute", "infra/restart"),
+            PolicyResult::Deny(_)
+        ));
+    }
+
+    #[test]
+    fn exact_subject_and_wildcard_subject_grants_are_combined() {
+        let yaml = r#"
+roles:
+  - name: reader
+    permissions: [read]
+    resources: ["reports/*"]
+  - name: writer
+    permissions: [write]
+    resources: ["reports/*"]
+
+assignments:
+  - subject: "agent:report-*"
+    roles: [reader]
+  - subject: "agent:report-prod"
+    roles: [writer]
+"#;
+        let e = RbacEngine::from_yaml(yaml).expect("engine build should succeed");
+        assert_eq!(
+            e.check("agent:report-prod", "read", "reports/q1"),
+            PolicyResult::Allow
+        );
+        assert_eq!(
+            e.check("agent:report-prod", "write", "reports/q1"),
+            PolicyResult::Allow
+        );
+    }
+
+    #[test]
+    fn invalid_subject_pattern_fails_policy_load() {
+        let yaml = r#"
+roles:
+  - name: reader
+    permissions: [read]
+    resources: ["*"]
+
+assignments:
+  - subject: "agent:[broken"
+    roles: [reader]
+"#;
+        let result = RbacEngine::from_yaml(yaml);
+        assert!(
+            result.is_err(),
+            "malformed subject glob must fail at load, not silently deny"
+        );
     }
 
     #[test]

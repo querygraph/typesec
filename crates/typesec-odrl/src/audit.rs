@@ -2,7 +2,7 @@
 
 use tracing::info;
 
-use crate::model::OdrlRuleType;
+use crate::model::{ConstraintOperand, OdrlRuleType};
 
 /// A structured audit record for a single ODRL policy check.
 #[derive(Debug)]
@@ -33,6 +33,13 @@ pub enum OdrlVerdict {
         /// Human-readable reason explaining why the action is prohibited.
         reason: String,
     },
+    /// A permission rule matched but was overridden by a prohibition.
+    Overridden {
+        /// The policy UID containing the prohibition that took priority.
+        by_policy: String,
+        /// Human-readable reason explaining the override.
+        reason: String,
+    },
     /// No matching rule found.
     NotApplicable,
     /// A permission rule matched but one or more constraints failed.
@@ -46,7 +53,7 @@ pub enum OdrlVerdict {
 #[derive(Debug, Clone)]
 pub struct ConstraintEval {
     /// The left operand (e.g., `"purpose"`).
-    pub operand: String,
+    pub operand: ConstraintOperand,
     /// Whether it passed.
     pub passed: bool,
 }
@@ -57,6 +64,9 @@ impl OdrlAuditEvent {
         let verdict_str = match &self.verdict {
             OdrlVerdict::Permitted => "permitted".to_owned(),
             OdrlVerdict::Prohibited { reason } => format!("prohibited: {reason}"),
+            OdrlVerdict::Overridden { by_policy, reason } => {
+                format!("overridden by {by_policy}: {reason}")
+            }
             OdrlVerdict::NotApplicable => "not_applicable".to_owned(),
             OdrlVerdict::ConstraintFailed { constraint } => {
                 format!("constraint_failed: {constraint}")

@@ -1,6 +1,8 @@
 //! Serde data model for ODRL YAML policies.
 
-use serde::{Deserialize, Serialize};
+use std::fmt;
+
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Root document: a collection of ODRL policies.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -126,12 +128,72 @@ impl RuleAction {
 pub struct OdrlConstraint {
     /// The left operand (e.g., `"purpose"`, `"dateTime"`, `"count"`).
     #[serde(rename = "leftOperand")]
-    pub left_operand: String,
+    pub left_operand: ConstraintOperand,
     /// The comparison operator.
     pub operator: ConstraintOperator,
     /// The right operand value (string representation).
     #[serde(rename = "rightOperand")]
     pub right_operand: String,
+}
+
+/// Typed ODRL constraint operands supported by TypeSec.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConstraintOperand {
+    /// The request purpose.
+    Purpose,
+    /// The request timestamp; accepts `dateTime` and legacy `date` in YAML.
+    DateTime,
+    /// A count value supplied in the custom request context.
+    Count,
+    /// An extension operand supplied through custom request context.
+    Custom(String),
+}
+
+impl ConstraintOperand {
+    /// Parse an ODRL operand name.
+    pub fn parse(name: impl Into<String>) -> Self {
+        let name = name.into();
+        match name.as_str() {
+            "purpose" => Self::Purpose,
+            "dateTime" | "date" => Self::DateTime,
+            "count" => Self::Count,
+            _ => Self::Custom(name),
+        }
+    }
+
+    /// Return the canonical ODRL operand name.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Purpose => "purpose",
+            Self::DateTime => "dateTime",
+            Self::Count => "count",
+            Self::Custom(name) => name,
+        }
+    }
+}
+
+impl fmt::Display for ConstraintOperand {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl Serialize for ConstraintOperand {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ConstraintOperand {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        String::deserialize(deserializer).map(Self::parse)
+    }
 }
 
 /// ODRL constraint operators.

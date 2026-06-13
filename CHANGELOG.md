@@ -7,6 +7,9 @@ by release version, then by the date the logical change landed.
 
 ### 2026-06-13
 
+- Added RBAC wildcard subject assignments with compiled glob validation, typed
+  ODRL constraint operands, prohibition-overridden ODRL audit events, and
+  snake_case role names for multiword `policy!` roles.
 - Hardened runtime security internals with typed UTC audit timestamps,
   source-preserving engine errors, zeroizing bearer tokens and credentials, and
   Python free-function documentation that steers repeated checks to

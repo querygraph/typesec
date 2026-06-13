@@ -76,6 +76,37 @@ fn check_permission(name: &str, span: Span) -> Result<(), syn::Error> {
     }
 }
 
+fn pascal_to_snake(name: &str) -> String {
+    let chars: Vec<char> = name.chars().collect();
+    let mut out = String::new();
+
+    for (i, ch) in chars.iter().enumerate() {
+        if ch.is_ascii_uppercase() {
+            let prev = i.checked_sub(1).and_then(|idx| chars.get(idx));
+            let next = chars.get(i + 1);
+            let starts_new_word = prev.is_some_and(|prev| {
+                prev.is_ascii_lowercase()
+                    || prev.is_ascii_digit()
+                    || (prev.is_ascii_uppercase()
+                        && next.is_some_and(|next| next.is_ascii_lowercase()))
+            });
+
+            if starts_new_word && !out.ends_with('_') {
+                out.push('_');
+            }
+            out.push(ch.to_ascii_lowercase());
+        } else if *ch == '-' {
+            if !out.ends_with('_') {
+                out.push('_');
+            }
+        } else {
+            out.push(*ch);
+        }
+    }
+
+    out
+}
+
 /// Derive the `typesec_core::role::Role` trait.
 ///
 /// Requires a `#[role(permissions = "...", resources = "...")]` attribute.
@@ -254,7 +285,7 @@ fn policy_impl(input: proc_macro2::TokenStream) -> Result<proc_macro2::TokenStre
     let mut output = proc_macro2::TokenStream::new();
 
     for (name, perms, resources) in parsed.0 {
-        let name_str = name.to_string().to_lowercase();
+        let name_str = pascal_to_snake(&name.to_string());
         for perm in &perms {
             check_permission(&perm.to_string(), perm.span())?;
         }
@@ -279,4 +310,17 @@ fn policy_impl(input: proc_macro2::TokenStream) -> Result<proc_macro2::TokenStre
     }
 
     Ok(output)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pascal_to_snake;
+
+    #[test]
+    fn converts_pascal_case_role_names_to_snake_case() {
+        assert_eq!(pascal_to_snake("AnalystReadOnly"), "analyst_read_only");
+        assert_eq!(pascal_to_snake("AITrainer"), "ai_trainer");
+        assert_eq!(pascal_to_snake("HTTPAuditLog"), "http_audit_log");
+        assert_eq!(pascal_to_snake("Reader"), "reader");
+    }
 }

@@ -10,6 +10,11 @@ use crate::{
     model::{OdrlDocument, OdrlRuleType},
 };
 
+struct RuleMatch {
+    policy_uid: String,
+    evals: Vec<ConstraintEval>,
+}
+
 /// An ODRL policy engine.
 ///
 /// The engine holds a parsed [`OdrlDocument`] and evaluates requests against
@@ -56,10 +61,10 @@ impl OdrlEngine {
         debug!(subject, action, resource, "odrl check");
 
         // Collect all matching rules across all policies.
-        let mut permission_match: Option<(&str, Vec<ConstraintEval>)> = None; // (policy_uid, evals)
-        let mut prohibition_match: Option<(&str, String, Vec<ConstraintEval>)> = None;
+        let mut permission_matches: Vec<RuleMatch> = Vec::new();
+        let mut prohibition_match: Option<(String, String, Vec<ConstraintEval>)> = None;
 
-        'policies: for policy in &self.doc.policies {
+        for policy in &self.doc.policies {
             for rule in &policy.rules {
                 // Check assignee matches.
                 if rule.assignee != subject {
@@ -92,12 +97,18 @@ impl OdrlEngine {
                             "prohibited by policy '{}' (action '{}' on '{}')",
                             policy.uid, action, resource
                         );
-                        prohibition_match = Some((&policy.uid, reason, constraint_evals));
-                        // ODRL: prohibitions take priority — stop scanning.
-                        break 'policies;
+                        if prohibition_match.is_none() {
+                            prohibition_match =
+                                Some((policy.uid.clone(), reason, constraint_evals));
+                        }
+                        // Keep scanning so permissions overridden by the
+                        // prohibition still appear in the audit trail.
                     }
                     OdrlRuleType::Permission if all_passed => {
-                        permission_match = Some((&policy.uid, constraint_evals));
+                        permission_matches.push(RuleMatch {
+                            policy_uid: policy.uid.clone(),
+                            evals: constraint_evals,
+                        });
                         // Don't break: a later prohibition might override this.
                     }
                     _ => {} // duty, or constraint failed
@@ -107,6 +118,22 @@ impl OdrlEngine {
 
         // Resolution: prohibition wins over permission.
         if let Some((policy_uid, reason, evals)) = prohibition_match {
+            for permission_match in permission_matches {
+                let event = OdrlAuditEvent {
+                    policy_uid: permission_match.policy_uid,
+                    matched_rule: Some(OdrlRuleType::Permission),
+                    subject: subject.to_owned(),
+                    action: action.to_owned(),
+                    target: resource.to_owned(),
+                    verdict: OdrlVerdict::Overridden {
+                        by_policy: policy_uid.clone(),
+                        reason: reason.clone(),
+                    },
+                    constraint_results: permission_match.evals,
+                };
+                event.log();
+            }
+
             let event = OdrlAuditEvent {
                 policy_uid: policy_uid.to_owned(),
                 matched_rule: Some(OdrlRuleType::Prohibition),
@@ -122,15 +149,15 @@ impl OdrlEngine {
             return PolicyResult::Deny(reason);
         }
 
-        if let Some((policy_uid, evals)) = permission_match {
+        if let Some(permission_match) = permission_matches.pop() {
             let event = OdrlAuditEvent {
-                policy_uid: policy_uid.to_owned(),
+                policy_uid: permission_match.policy_uid,
                 matched_rule: Some(OdrlRuleType::Permission),
                 subject: subject.to_owned(),
                 action: action.to_owned(),
                 target: resource.to_owned(),
                 verdict: OdrlVerdict::Permitted,
-                constraint_results: evals,
+                constraint_results: permission_match.evals,
             };
             event.log();
             return PolicyResult::Allow;
@@ -245,5 +272,31 @@ policies:
         let ctx = ConstraintContext::default().with_purpose("analytics");
         let result = e.check_with_context("agent:unknown", "read", "customer-data", &ctx);
         assert!(matches!(result, PolicyResult::Delegate(_)));
+    }
+
+    #[test]
+    fn prohibition_does_not_stop_later_permission_scan() {
+        let yaml = r#"
+policies:
+  - uid: "policy:block"
+    type: Set
+    rules:
+      - type: prohibition
+        assignee: "agent:summarizer"
+        action: read
+        target: "asset:customer-data"
+  - uid: "policy:allow"
+    type: Set
+    rules:
+      - type: permission
+        assigner: "org:acme"
+        assignee: "agent:summarizer"
+        action: read
+        target: "asset:customer-data"
+"#;
+        let e = OdrlEngine::from_yaml(yaml).expect("engine build ok");
+        let ctx = ConstraintContext::default();
+        let result = e.check_with_context("agent:summarizer", "read", "customer-data", &ctx);
+        assert!(matches!(result, PolicyResult::Deny(_)));
     }
 }

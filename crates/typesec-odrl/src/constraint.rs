@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use tracing::debug;
 use typesec_core::policy::RequestContext;
 
-use crate::model::{ConstraintOperator, OdrlConstraint};
+use crate::model::{ConstraintOperand, ConstraintOperator, OdrlConstraint};
 
 /// Context provided when evaluating constraints.
 ///
@@ -68,20 +68,24 @@ pub fn evaluate(constraint: &OdrlConstraint, ctx: &ConstraintContext) -> bool {
         "evaluating constraint"
     );
 
-    match constraint.left_operand.as_str() {
-        "purpose" => evaluate_purpose(constraint, ctx),
-        "dateTime" => evaluate_datetime(constraint, ctx),
-        "date" => evaluate_datetime(constraint, ctx),
-        other => {
-            // Fall back to custom context values.
-            if let Some(val) = ctx.custom.get(other) {
-                evaluate_string_op(&constraint.operator, val, &constraint.right_operand)
-            } else {
-                // Unknown operand — be conservative and deny.
-                debug!("unknown constraint left operand '{other}' — failing closed");
-                false
-            }
-        }
+    match &constraint.left_operand {
+        ConstraintOperand::Purpose => evaluate_purpose(constraint, ctx),
+        ConstraintOperand::DateTime => evaluate_datetime(constraint, ctx),
+        ConstraintOperand::Count => evaluate_custom_operand("count", constraint, ctx),
+        ConstraintOperand::Custom(name) => evaluate_custom_operand(name, constraint, ctx),
+    }
+}
+
+fn evaluate_custom_operand(
+    operand: &str,
+    constraint: &OdrlConstraint,
+    ctx: &ConstraintContext,
+) -> bool {
+    if let Some(val) = ctx.custom.get(operand) {
+        evaluate_string_op(&constraint.operator, val, &constraint.right_operand)
+    } else {
+        debug!("unknown constraint left operand '{operand}' — failing closed");
+        false
     }
 }
 
@@ -134,11 +138,11 @@ fn evaluate_string_op(op: &ConstraintOperator, actual: &str, expected: &str) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{ConstraintOperator, OdrlConstraint};
+    use crate::model::{ConstraintOperand, ConstraintOperator, OdrlConstraint};
 
     fn make_constraint(left: &str, op: ConstraintOperator, right: &str) -> OdrlConstraint {
         OdrlConstraint {
-            left_operand: left.into(),
+            left_operand: ConstraintOperand::parse(left),
             operator: op,
             right_operand: right.into(),
         }
@@ -181,6 +185,27 @@ mod tests {
     fn datetime_lt_fails_when_past() {
         let past = "2000-01-01T00:00:00Z";
         let c = make_constraint("dateTime", ConstraintOperator::Lt, past);
+        let ctx = ConstraintContext::default();
+        assert!(!evaluate(&c, &ctx));
+    }
+
+    #[test]
+    fn count_operand_reads_custom_context() {
+        let c = make_constraint("count", ConstraintOperator::Lteq, "5");
+        let ctx = ConstraintContext::default().with("count", "3");
+        assert!(evaluate(&c, &ctx));
+    }
+
+    #[test]
+    fn custom_operand_reads_custom_context() {
+        let c = make_constraint("region", ConstraintOperator::Eq, "eu");
+        let ctx = ConstraintContext::default().with("region", "eu");
+        assert!(evaluate(&c, &ctx));
+    }
+
+    #[test]
+    fn unknown_custom_operand_fails_closed() {
+        let c = make_constraint("region", ConstraintOperator::Eq, "eu");
         let ctx = ConstraintContext::default();
         assert!(!evaluate(&c, &ctx));
     }
