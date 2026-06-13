@@ -1514,6 +1514,16 @@ agent layer across more realistic scenarios. Provider integration tests in
 WorkOS, Arcade, JWT, and capability-composition path. Python smoke tests in
 `tests/python/test_cli_policy.py` exercise the CLI as a policy oracle.
 
+Benchmark and fuzz tooling cover the hot paths and parser boundaries:
+
+```sh
+cargo bench -p typesec-core --bench policy_check
+cargo bench -p typesec-rbac --bench rbac_check
+cargo bench -p typesec-odrl --bench odrl_check
+cargo fuzz run rbac_yaml -- -max_total_time=300
+cargo fuzz run odrl_yaml -- -max_total_time=300
+```
+
 During today's final publishing pass, the merged repository was checked with:
 
 ```sh

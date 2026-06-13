@@ -20,6 +20,8 @@ by release version, then by the date the logical change landed.
   and capability freshness.
 - Added `typesec run --scenario` for YAML-described multi-agent traces with
   per-step action/resource checks and optional expected results.
+- Added Criterion benchmark targets for core policy paths, RBAC checks, and
+  ODRL constraints, plus cargo-fuzz targets for RBAC and ODRL YAML parsing.
 - Added RBAC wildcard subject assignments with compiled glob validation, typed
   ODRL constraint operands, prohibition-overridden ODRL audit events, and
   snake_case role names for multiword `policy!` roles.

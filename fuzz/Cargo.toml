@@ -1,0 +1,25 @@
+[package]
+name = "typesec-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+typesec-odrl = { path = "../crates/typesec-odrl" }
+typesec-rbac = { path = "../crates/typesec-rbac" }
+
+[[bin]]
+name = "rbac_yaml"
+path = "fuzz_targets/rbac_yaml.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "odrl_yaml"
+path = "fuzz_targets/odrl_yaml.rs"
+test = false
+doc = false

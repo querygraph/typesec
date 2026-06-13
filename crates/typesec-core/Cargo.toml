@@ -15,5 +15,10 @@ tracing = { workspace = true }
 zeroize = { workspace = true }
 
 [dev-dependencies]
+criterion = { workspace = true }
 futures = { workspace = true }
 trybuild = "1"
+
+[[bench]]
+name = "policy_check"
+harness = false

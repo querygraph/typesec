@@ -130,6 +130,23 @@ The trace prints each step's policy result and whether the optional `expect`
 value matched. Expectation mismatches make the command exit nonzero after the
 trace.
 
+## Benchmark And Fuzz Tooling
+
+Criterion benches cover the hot policy paths:
+
+```sh
+cargo bench -p typesec-core --bench policy_check
+cargo bench -p typesec-rbac --bench rbac_check
+cargo bench -p typesec-odrl --bench odrl_check
+```
+
+Parser fuzz targets live in the standalone `fuzz/` package:
+
+```sh
+cargo fuzz run rbac_yaml -- -max_total_time=300
+cargo fuzz run odrl_yaml -- -max_total_time=300
+```
+
 ## `rbac_agent.rs`
 
 Path:
