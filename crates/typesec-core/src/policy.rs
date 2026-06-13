@@ -38,6 +38,7 @@ use crate::{Capability, Permission, Resource};
 /// The verdict returned by a policy engine.
 #[must_use = "policy decisions must be checked; an ignored result is a silent allow/deny"]
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum PolicyResult {
     /// The action is allowed. The engine may provide a rationale.
     Allow,
@@ -47,7 +48,51 @@ pub enum PolicyResult {
     ///
     /// Used in policy composition: e.g., an ODRL engine delegates to RBAC
     /// for actions not covered by any ODRL rule.
-    Delegate(String),
+    Delegate(DelegationReason),
+}
+
+impl PolicyResult {
+    /// Build a structured delegation decision.
+    pub fn delegate(engine: &'static str, reason: impl Into<String>) -> Self {
+        Self::Delegate(DelegationReason::new(engine, reason))
+    }
+}
+
+/// Structured explanation for an unresolved policy decision.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DelegationReason {
+    /// Engine that delegated.
+    pub engine: &'static str,
+    /// Why this engine could not decide.
+    pub reason: String,
+    /// Optional extra context about the delegation path.
+    pub context: Option<String>,
+}
+
+impl DelegationReason {
+    /// Create a delegation reason without extra context.
+    pub fn new(engine: &'static str, reason: impl Into<String>) -> Self {
+        Self {
+            engine,
+            reason: reason.into(),
+            context: None,
+        }
+    }
+
+    /// Attach additional path/context detail.
+    pub fn with_context(mut self, context: impl Into<String>) -> Self {
+        self.context = Some(context.into());
+        self
+    }
+}
+
+impl fmt::Display for DelegationReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.context {
+            Some(context) => write!(f, "{}: {} ({context})", self.engine, self.reason),
+            None => write!(f, "{}: {}", self.engine, self.reason),
+        }
+    }
 }
 
 impl std::fmt::Display for PolicyResult {
@@ -55,7 +100,7 @@ impl std::fmt::Display for PolicyResult {
         match self {
             Self::Allow => f.write_str("allow"),
             Self::Deny(reason) => write!(f, "deny: {reason}"),
-            Self::Delegate(to) => write!(f, "delegate to {to}"),
+            Self::Delegate(reason) => write!(f, "delegate: {reason}"),
         }
     }
 }
@@ -93,6 +138,7 @@ impl RequestContext {
 
 /// Error type for capability acquisition failures.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum CapabilityError {
     /// Policy explicitly denied the request.
     #[error("access denied: {reason}")]
@@ -182,7 +228,9 @@ impl AuditEvent {
                 action = %self.action,
                 resource = %self.resource,
                 verdict = "delegate",
-                to = %to,
+                engine = %to.engine,
+                reason = %to.reason,
+                context = ?to.context,
                 ts = %format_audit_timestamp(&self.timestamp),
                 "policy decision"
             ),
@@ -567,7 +615,7 @@ mod tests {
         struct DelegateAlways;
         impl PolicyEngine for DelegateAlways {
             fn check(&self, _: &str, _: &str, _: &str) -> PolicyResult {
-                PolicyResult::Delegate("fallback".into())
+                PolicyResult::delegate("test", "fallback")
             }
         }
 

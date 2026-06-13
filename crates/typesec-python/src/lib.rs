@@ -238,12 +238,22 @@ fn decision_from_result(
             resource: resource.to_string(),
             reason: Some(reason),
         },
-        PolicyResult::Delegate(to) => Decision {
+        PolicyResult::Delegate(reason) => Decision {
             allowed: false,
             subject: subject.to_string(),
             action: action.to_string(),
             resource: resource.to_string(),
-            reason: Some(format!("policy delegated to {to}")),
+            reason: Some(format!(
+                "policy delegated to {}: {}",
+                reason.engine, reason.reason
+            )),
+        },
+        _ => Decision {
+            allowed: false,
+            subject: subject.to_string(),
+            action: action.to_string(),
+            resource: resource.to_string(),
+            reason: Some("unknown policy result".to_string()),
         },
     }
 }

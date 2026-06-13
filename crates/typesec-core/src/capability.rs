@@ -83,6 +83,7 @@ impl RevocationEpoch {
 
 /// Error returned when a capability is no longer valid for use.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum CapabilityUseError {
     /// The capability lease has expired.
     #[error("capability expired (issued_at={issued_at:?}, expires_at={expires_at:?})")]

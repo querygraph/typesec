@@ -34,6 +34,7 @@ use crate::policy::{PolicyEngine, PolicyResult, RequestContext};
 
 /// How to combine multiple policy engine verdicts into a single decision.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum CombineStrategy {
     /// Allow only when **all** non-delegating engines say Allow.
     ///
@@ -131,7 +132,7 @@ fn priority_order(
             result => return result,
         }
     }
-    PolicyResult::Delegate("all engines delegated".into())
+    PolicyResult::delegate("composed", "all engines delegated")
 }
 
 fn allow_if_all(
@@ -163,7 +164,7 @@ fn allow_if_all(
     } else if any_definitive {
         PolicyResult::Allow
     } else {
-        PolicyResult::Delegate("all engines delegated".into())
+        PolicyResult::delegate("composed", "all engines delegated")
     }
 }
 
@@ -186,7 +187,7 @@ fn allow_if_any(
         }
     }
 
-    last_deny.unwrap_or_else(|| PolicyResult::Delegate("all engines delegated".into()))
+    last_deny.unwrap_or_else(|| PolicyResult::delegate("composed", "all engines delegated"))
 }
 
 fn deny_overrides(
@@ -218,7 +219,7 @@ fn deny_overrides(
     } else if any_allow {
         PolicyResult::Allow
     } else {
-        PolicyResult::Delegate("all engines delegated".into())
+        PolicyResult::delegate("composed", "all engines delegated")
     }
 }
 
@@ -297,7 +298,7 @@ mod tests {
         struct G;
         impl PolicyEngine for G {
             fn check(&self, _: &str, _: &str, _: &str) -> PolicyResult {
-                PolicyResult::Delegate("abstain".into())
+                PolicyResult::delegate("test", "abstain")
             }
         }
         Arc::new(G)

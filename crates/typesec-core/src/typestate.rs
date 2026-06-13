@@ -120,6 +120,7 @@ pub trait Authenticator: Send + Sync {
 
 /// Error types for agent operations.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum AgentError {
     /// Authentication failed.
     #[error("authentication failed: {reason}")]

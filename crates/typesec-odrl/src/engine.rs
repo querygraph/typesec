@@ -174,7 +174,7 @@ impl OdrlEngine {
             constraint_results: vec![],
         };
         event.log();
-        PolicyResult::Delegate("no matching ODRL rule — delegating".into())
+        PolicyResult::delegate("odrl", "no matching ODRL rule")
     }
 }
 

@@ -85,15 +85,17 @@ impl PolicyEngine for ArcadeToolAuthEngine {
         debug!(subject, action, resource, "arcade tool authorization check");
 
         if action != "execute" && action != "read" && action != "write" {
-            return PolicyResult::Delegate(format!(
-                "Arcade tool auth does not handle action '{action}'"
-            ));
+            return PolicyResult::delegate(
+                "arcade",
+                format!("Arcade tool auth does not handle action '{action}'"),
+            );
         }
 
         let Some(tool_name) = self.tool_name_for(resource) else {
-            return PolicyResult::Delegate(format!(
-                "no Arcade tool mapping for resource '{resource}'"
-            ));
+            return PolicyResult::delegate(
+                "arcade",
+                format!("no Arcade tool mapping for resource '{resource}'"),
+            );
         };
 
         let url = format!("{}/v1/tools/authorize", self.base_url);

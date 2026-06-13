@@ -152,8 +152,14 @@ async fn simulate_task(
         PolicyResult::Deny(reason) => {
             println!("  ✗ DENIED — {reason}");
         }
-        PolicyResult::Delegate(to) => {
-            println!("  → DELEGATED to {to} (no definitive answer)");
+        PolicyResult::Delegate(reason) => {
+            println!(
+                "  → DELEGATED to {}: {} (no definitive answer)",
+                reason.engine, reason.reason
+            );
+        }
+        _ => {
+            println!("  ✗ UNKNOWN POLICY RESULT — treating as denied");
         }
     }
 }

@@ -104,9 +104,17 @@ fn print_human_result(args: &CheckArgs, result: &PolicyResult) {
             println!("  Resource: {}", args.resource);
             println!("  Reason:   {reason}");
         }
-        PolicyResult::Delegate(to) => {
-            println!("→ DELEGATE to: {to}");
+        PolicyResult::Delegate(reason) => {
+            println!("→ DELEGATE to: {}", reason.engine);
+            println!("  Reason:   {}", reason.reason);
+            if let Some(context) = &reason.context {
+                println!("  Context:  {context}");
+            }
             println!("  (no definitive answer from this engine)");
+        }
+        _ => {
+            println!("✗ UNKNOWN POLICY RESULT");
+            println!("  Treating as denied");
         }
     }
 }
@@ -122,6 +130,7 @@ fn exit_for_result(result: &PolicyResult) -> ! {
         PolicyResult::Allow => std::process::exit(0),
         PolicyResult::Deny(_) => std::process::exit(1),
         PolicyResult::Delegate(_) => std::process::exit(2),
+        _ => std::process::exit(1),
     }
 }
 
@@ -140,15 +149,30 @@ struct CheckJsonResponse<'a> {
     reason: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     delegate_to: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    delegate_engine: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    delegate_context: Option<&'a str>,
 }
 
 impl<'a> CheckJsonResponse<'a> {
     fn new(args: &'a CheckArgs, format: Option<&'a str>, result: &'a PolicyResult) -> Self {
-        let (decision, allowed, reason, delegate_to) = match result {
-            PolicyResult::Allow => ("allow", true, None, None),
-            PolicyResult::Deny(reason) => ("deny", false, Some(reason.as_str()), None),
-            PolicyResult::Delegate(to) => ("delegate", false, None, Some(to.as_str())),
-        };
+        let (decision, allowed, reason, delegate_to, delegate_engine, delegate_context) =
+            match result {
+                PolicyResult::Allow => ("allow", true, None, None, None, None),
+                PolicyResult::Deny(reason) => {
+                    ("deny", false, Some(reason.as_str()), None, None, None)
+                }
+                PolicyResult::Delegate(reason) => (
+                    "delegate",
+                    false,
+                    None,
+                    Some(reason.engine),
+                    Some(reason.engine),
+                    reason.context.as_deref(),
+                ),
+                _ => ("unknown", false, None, None, None, None),
+            };
 
         Self {
             decision,
@@ -160,6 +184,8 @@ impl<'a> CheckJsonResponse<'a> {
             purpose: args.purpose.as_deref(),
             reason,
             delegate_to,
+            delegate_engine,
+            delegate_context,
         }
     }
 }

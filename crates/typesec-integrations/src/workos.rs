@@ -97,7 +97,7 @@ impl PolicyEngine for WorkOsFgaEngine {
 
         let request = match self.request_for(action, resource) {
             Ok(request) => request,
-            Err(reason) => return PolicyResult::Delegate(reason),
+            Err(reason) => return PolicyResult::delegate("workos", reason),
         };
 
         let url = format!(

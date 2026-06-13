@@ -10,6 +10,9 @@ by release version, then by the date the logical change landed.
 - Added RBAC wildcard subject assignments with compiled glob validation, typed
   ODRL constraint operands, prohibition-overridden ODRL audit events, and
   snake_case role names for multiword `policy!` roles.
+- Added forward-compatible public policy enums and structured delegation
+  reasons so CLI, Python, audit, and composed-engine output can report which
+  engine abstained and why.
 - Hardened runtime security internals with typed UTC audit timestamps,
   source-preserving engine errors, zeroizing bearer tokens and credentials, and
   Python free-function documentation that steers repeated checks to

@@ -25,6 +25,7 @@ pub struct OdrlAuditEvent {
 
 /// Verdict of an ODRL check.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum OdrlVerdict {
     /// A permission rule matched and all constraints passed.
     Permitted,

@@ -405,14 +405,21 @@ All policy engines return:
 pub enum PolicyResult {
     Allow,
     Deny(String),
-    Delegate(String),
+    Delegate(DelegationReason),
+}
+
+pub struct DelegationReason {
+    pub engine: &'static str,
+    pub reason: String,
+    pub context: Option<String>,
 }
 ```
 
 `Allow` mints a capability. `Deny` returns an error with a reason. `Delegate`
-means this engine has no definitive answer and another engine may decide. ODRL
-uses delegation naturally: if an ODRL policy has no matching rule, it can defer
-to RBAC.
+means this engine has no definitive answer and another engine may decide. The
+delegation reason records which engine abstained, why it abstained, and
+optionally the surrounding delegation context. ODRL uses delegation naturally:
+if an ODRL policy has no matching rule, it can defer to RBAC.
 
 The error type for capability acquisition is:
 
@@ -420,15 +427,15 @@ The error type for capability acquisition is:
 pub enum CapabilityError {
     Denied { reason: String },
     UnhandledDelegation,
-    EngineError(String),
+    EngineError(Box<dyn std::error::Error + Send + Sync>),
 }
 ```
 
-One future improvement is to make delegation more first-class at the
-capability-minting boundary. Today, if a single engine delegates and no wrapper
-handles that delegation, minting fails with `UnhandledDelegation`. The
-composition layer solves this for deployed combinations, but the distinction is
-worth documenting.
+If a single engine delegates and no wrapper handles that delegation, minting
+fails with `UnhandledDelegation`. The composition layer solves this for
+deployed combinations, and the structured delegation reason keeps enough
+provenance for CLI, Python, and audit output to report where the abstention
+came from.
 
 ## Minting
 

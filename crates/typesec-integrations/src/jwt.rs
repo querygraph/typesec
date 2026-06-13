@@ -324,16 +324,19 @@ impl PolicyEngine for JwtClaimsEngine {
         debug!(subject, action, resource, org_id = ?self.org_id, "jwt claims check");
 
         if subject != self.subject {
-            return PolicyResult::Delegate(format!(
-                "jwt claims are for '{}', not '{subject}'",
-                self.subject
-            ));
+            return PolicyResult::delegate(
+                "jwt",
+                format!("jwt claims are for '{}', not '{subject}'", self.subject),
+            );
         }
 
         if self.permission_matches(action, resource) {
             PolicyResult::Allow
         } else {
-            PolicyResult::Delegate(format!("permission '{action}' not present in jwt claims"))
+            PolicyResult::delegate(
+                "jwt",
+                format!("permission '{action}' not present in jwt claims"),
+            )
         }
     }
 }
