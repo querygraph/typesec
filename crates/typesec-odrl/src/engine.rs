@@ -1,5 +1,7 @@
 //! ODRL policy engine — implements [`PolicyEngine`] for an [`OdrlDocument`].
 
+use std::collections::HashMap;
+
 use glob::Pattern;
 use tracing::debug;
 use typesec_core::policy::{PolicyEngine, PolicyResult, RequestContext};
@@ -7,12 +9,23 @@ use typesec_core::policy::{PolicyEngine, PolicyResult, RequestContext};
 use crate::{
     audit::{ConstraintEval, OdrlAuditEvent, OdrlVerdict},
     constraint::{ConstraintContext, evaluate},
-    model::{OdrlDocument, OdrlRuleType},
+    model::{OdrlDocument, OdrlRuleType, RuleAction},
 };
 
 struct RuleMatch {
     policy_uid: String,
     evals: Vec<ConstraintEval>,
+}
+
+type RuleKey = (String, String);
+type RuleIndex = HashMap<RuleKey, Vec<RuleRef>>;
+type WildcardActionIndex = HashMap<String, Vec<RuleRef>>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RuleRef {
+    policy_index: usize,
+    rule_index: usize,
+    ordinal: usize,
 }
 
 /// An ODRL policy engine.
@@ -24,6 +37,10 @@ struct RuleMatch {
 /// Every check emits a structured [`OdrlAuditEvent`] via `tracing`.
 pub struct OdrlEngine {
     doc: OdrlDocument,
+    /// Exact `(assignee, action)` index for the common case.
+    exact_rules: RuleIndex,
+    /// Same-assignee wildcard action (`use`) rules.
+    wildcard_action_rules: WildcardActionIndex,
     /// Default context applied to every check (can be overridden per-check).
     default_context: ConstraintContext,
 }
@@ -31,8 +48,11 @@ pub struct OdrlEngine {
 impl OdrlEngine {
     /// Build an engine from a parsed document.
     pub fn new(doc: OdrlDocument) -> Self {
+        let (exact_rules, wildcard_action_rules) = build_rule_index(&doc);
         Self {
             doc,
+            exact_rules,
+            wildcard_action_rules,
             default_context: ConstraintContext::default(),
         }
     }
@@ -58,61 +78,60 @@ impl OdrlEngine {
         resource: &str,
         ctx: &ConstraintContext,
     ) -> PolicyResult {
-        debug!(subject, action, resource, "odrl check");
+        let candidates = self.candidate_rules(subject, action);
+        debug!(
+            subject,
+            action,
+            resource,
+            n_candidates = candidates.len(),
+            "odrl check"
+        );
 
-        // Collect all matching rules across all policies.
+        // Collect all matching indexed rules.
         let mut permission_matches: Vec<RuleMatch> = Vec::new();
         let mut prohibition_match: Option<(String, String, Vec<ConstraintEval>)> = None;
 
-        for policy in &self.doc.policies {
-            for rule in &policy.rules {
-                // Check assignee matches.
-                if rule.assignee != subject {
-                    continue;
-                }
-                // Check action matches.
-                if !rule.action.matches_action(action) {
-                    continue;
-                }
-                // Check target (glob) matches.
-                if !target_matches(&rule.target, resource) {
-                    continue;
-                }
+        for rule_ref in candidates {
+            let policy = &self.doc.policies[rule_ref.policy_index];
+            let rule = &policy.rules[rule_ref.rule_index];
 
-                // Evaluate constraints.
-                let constraint_evals: Vec<ConstraintEval> = rule
-                    .constraints
-                    .iter()
-                    .map(|c| ConstraintEval {
-                        operand: c.left_operand.clone(),
-                        passed: evaluate(c, ctx),
-                    })
-                    .collect();
+            // Check target (glob) matches.
+            if !target_matches(&rule.target, resource) {
+                continue;
+            }
 
-                let all_passed = constraint_evals.iter().all(|e| e.passed);
+            // Evaluate constraints.
+            let constraint_evals: Vec<ConstraintEval> = rule
+                .constraints
+                .iter()
+                .map(|c| ConstraintEval {
+                    operand: c.left_operand.clone(),
+                    passed: evaluate(c, ctx),
+                })
+                .collect();
 
-                match rule.rule_type {
-                    OdrlRuleType::Prohibition if all_passed => {
-                        let reason = format!(
-                            "prohibited by policy '{}' (action '{}' on '{}')",
-                            policy.uid, action, resource
-                        );
-                        if prohibition_match.is_none() {
-                            prohibition_match =
-                                Some((policy.uid.clone(), reason, constraint_evals));
-                        }
-                        // Keep scanning so permissions overridden by the
-                        // prohibition still appear in the audit trail.
+            let all_passed = constraint_evals.iter().all(|e| e.passed);
+
+            match rule.rule_type {
+                OdrlRuleType::Prohibition if all_passed => {
+                    let reason = format!(
+                        "prohibited by policy '{}' (action '{}' on '{}')",
+                        policy.uid, action, resource
+                    );
+                    if prohibition_match.is_none() {
+                        prohibition_match = Some((policy.uid.clone(), reason, constraint_evals));
                     }
-                    OdrlRuleType::Permission if all_passed => {
-                        permission_matches.push(RuleMatch {
-                            policy_uid: policy.uid.clone(),
-                            evals: constraint_evals,
-                        });
-                        // Don't break: a later prohibition might override this.
-                    }
-                    _ => {} // duty, or constraint failed
+                    // Keep scanning so permissions overridden by the
+                    // prohibition still appear in the audit trail.
                 }
+                OdrlRuleType::Permission if all_passed => {
+                    permission_matches.push(RuleMatch {
+                        policy_uid: policy.uid.clone(),
+                        evals: constraint_evals,
+                    });
+                    // Don't break: a later prohibition might override this.
+                }
+                _ => {} // duty, or constraint failed
             }
         }
 
@@ -176,6 +195,27 @@ impl OdrlEngine {
         event.log();
         PolicyResult::delegate("odrl", "no matching ODRL rule")
     }
+
+    fn candidate_rules(&self, subject: &str, action: &str) -> Vec<RuleRef> {
+        let mut candidates = Vec::new();
+
+        if let Some(exact) = self
+            .exact_rules
+            .get(&(subject.to_owned(), action.to_owned()))
+        {
+            candidates.extend_from_slice(exact);
+        }
+
+        if let Some(wildcard) = self.wildcard_action_rules.get(subject) {
+            candidates.extend_from_slice(wildcard);
+        }
+
+        if candidates.len() > 1 {
+            candidates.sort_by_key(|rule_ref| rule_ref.ordinal);
+        }
+
+        candidates
+    }
 }
 
 impl PolicyEngine for OdrlEngine {
@@ -207,6 +247,40 @@ fn target_matches(target: &str, resource: &str) -> bool {
         return true;
     }
     Pattern::new(stripped).is_ok_and(|p| p.matches(resource))
+}
+
+fn build_rule_index(doc: &OdrlDocument) -> (RuleIndex, WildcardActionIndex) {
+    let mut exact_rules: RuleIndex = HashMap::new();
+    let mut wildcard_action_rules: WildcardActionIndex = HashMap::new();
+    let mut ordinal = 0;
+
+    for (policy_index, policy) in doc.policies.iter().enumerate() {
+        for (rule_index, rule) in policy.rules.iter().enumerate() {
+            let rule_ref = RuleRef {
+                policy_index,
+                rule_index,
+                ordinal,
+            };
+            ordinal += 1;
+
+            if matches!(rule.action, RuleAction::Use) {
+                wildcard_action_rules
+                    .entry(rule.assignee.clone())
+                    .or_default()
+                    .push(rule_ref);
+            } else {
+                exact_rules
+                    .entry((
+                        rule.assignee.clone(),
+                        rule.action.as_permission_name().to_owned(),
+                    ))
+                    .or_default()
+                    .push(rule_ref);
+            }
+        }
+    }
+
+    (exact_rules, wildcard_action_rules)
 }
 
 #[cfg(test)]
@@ -272,6 +346,78 @@ policies:
         let ctx = ConstraintContext::default().with_purpose("analytics");
         let result = e.check_with_context("agent:unknown", "read", "customer-data", &ctx);
         assert!(matches!(result, PolicyResult::Delegate(_)));
+    }
+
+    #[test]
+    fn exact_rule_index_is_built_at_construction() {
+        let e = engine();
+        assert_eq!(
+            e.exact_rules
+                .get(&("agent:summarizer".to_owned(), "read".to_owned()))
+                .expect("read rule indexed")
+                .len(),
+            1
+        );
+        assert_eq!(
+            e.exact_rules
+                .get(&("agent:summarizer".to_owned(), "ai:exfiltrate".to_owned()))
+                .expect("exfiltrate rule indexed")
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn indexed_use_action_matches_any_action() {
+        let yaml = r#"
+policies:
+  - uid: "policy:any-action"
+    type: Set
+    rules:
+      - type: permission
+        assigner: "org:acme"
+        assignee: "agent:operator"
+        action: use
+        target: "asset:ops/*"
+"#;
+        let e = OdrlEngine::from_yaml(yaml).expect("engine build ok");
+        assert_eq!(
+            e.wildcard_action_rules
+                .get("agent:operator")
+                .expect("use rule indexed")
+                .len(),
+            1
+        );
+
+        let ctx = ConstraintContext::default();
+        let result = e.check_with_context("agent:operator", "execute", "ops/restart", &ctx);
+        assert_eq!(result, PolicyResult::Allow);
+    }
+
+    #[test]
+    fn indexed_exact_action_still_checks_target_globs() {
+        let yaml = r#"
+policies:
+  - uid: "policy:reports"
+    type: Set
+    rules:
+      - type: permission
+        assigner: "org:acme"
+        assignee: "agent:analyst"
+        action: read
+        target: "asset:reports/**"
+"#;
+        let e = OdrlEngine::from_yaml(yaml).expect("engine build ok");
+        let ctx = ConstraintContext::default();
+
+        assert_eq!(
+            e.check_with_context("agent:analyst", "read", "reports/2026/q1", &ctx),
+            PolicyResult::Allow
+        );
+        assert!(matches!(
+            e.check_with_context("agent:analyst", "read", "metrics/q1", &ctx),
+            PolicyResult::Delegate(_)
+        ));
     }
 
     #[test]

@@ -1186,8 +1186,10 @@ data may be safe to summarize internally and unsafe to send outside the system.
 
 The ODRL engine evaluates subject, action, target, and constraints. Constraints
 are evaluated against a `ConstraintContext`, which can include purpose,
-date-time, and custom key values. The CLI exposes `--purpose` for the common
-case.
+date-time, and custom key values. The engine indexes rules at construction by
+assignee and action, with a same-assignee fallback for ODRL `use` wildcard
+rules; target globs and constraints are still evaluated at decision time. The
+CLI exposes `--purpose` for the common case.
 
 Conflict resolution is conservative:
 

@@ -19,6 +19,9 @@ by release version, then by the date the logical change landed.
 - Added `CanReadInternal`, a lattice relationship below sensitive-read, and
   `SecureValue<Internal>::reveal_internal` so internal data has a least-privilege
   reveal path distinct from sensitive and secret data.
+- Indexed ODRL rules by assignee and action at engine construction so common
+  exact checks avoid scanning unrelated rules while preserving `use` wildcard
+  action behavior.
 - Hardened runtime security internals with typed UTC audit timestamps,
   source-preserving engine errors, zeroizing bearer tokens and credentials, and
   Python free-function documentation that steers repeated checks to
