@@ -259,6 +259,7 @@ mod tests {
         policy::PolicyResult,
         resource::GenericResource,
     };
+    use proptest::prelude::*;
     use std::sync::Arc;
 
     // ── Helpers ────────────────────────────────────────────────────────────────
@@ -435,6 +436,56 @@ mod tests {
                         "missing transitive implication {a} => {c} via {b}"
                     );
                 }
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_explicit_implications_are_discoverable(index in 0usize..IMPLICATIONS.len()) {
+            let pairs: Vec<_> = implication_pairs().collect();
+            let (higher, lower) = pairs[index];
+
+            prop_assert!(
+                implied_by(lower).any(|candidate| candidate == higher),
+                "{higher} should appear in implied_by({lower})"
+            );
+        }
+
+        #[test]
+        fn prop_implication_table_has_no_self_edges_or_cycles(index in 0usize..IMPLICATIONS.len()) {
+            let pairs: Vec<_> = implication_pairs().collect();
+            let (higher, lower) = pairs[index];
+
+            // Same-permission use needs no coercion, so the explicit table stores
+            // only strict privilege demotions.
+            prop_assert_ne!(higher, lower, "permission cannot imply itself explicitly");
+            prop_assert!(
+                !pairs
+                    .iter()
+                    .any(|(candidate_higher, candidate_lower)| {
+                        *candidate_higher == lower && *candidate_lower == higher
+                    }),
+                "cycle found between {higher} and {lower}"
+            );
+        }
+
+        #[test]
+        fn prop_implication_table_contains_transitive_closure(
+            left in 0usize..IMPLICATIONS.len(),
+            right in 0usize..IMPLICATIONS.len(),
+        ) {
+            let pairs: Vec<_> = implication_pairs().collect();
+            let (a, b) = pairs[left];
+            let (candidate_b, c) = pairs[right];
+
+            if b == candidate_b {
+                prop_assert!(
+                    pairs
+                        .iter()
+                        .any(|(candidate_a, candidate_c)| *candidate_a == a && *candidate_c == c),
+                    "missing transitive implication {a} => {c} via {b}"
+                );
             }
         }
     }

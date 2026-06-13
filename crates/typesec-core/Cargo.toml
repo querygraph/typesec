@@ -17,6 +17,7 @@ zeroize = { workspace = true }
 [dev-dependencies]
 criterion = { workspace = true }
 futures = { workspace = true }
+proptest = { workspace = true }
 trybuild = "1"
 
 [[bench]]

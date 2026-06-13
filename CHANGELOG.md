@@ -14,6 +14,8 @@ by release version, then by the date the logical change landed.
   events, policy engines, minting helpers, CLI checks, Python gates, examples,
   and integration policy engines so subject/resource parameters no longer
   collapse into interchangeable strings.
+- Added property-based permission lattice law tests with `proptest` to exercise
+  runtime implication lookup, cycle prevention, and transitive-closure coverage.
 - Added `policy!` role inheritance with `role Child extends Parent`, flattening
   inherited permissions and resource patterns during macro expansion.
 - Added DID key rotation for `Ed25519DidKeyStore`, including active key version
