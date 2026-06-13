@@ -24,9 +24,12 @@
 //! [`set_audit_sink`] for a guaranteed write path.
 
 use std::collections::HashMap;
+use std::error::Error;
+use std::fmt;
 use std::sync::{Arc, OnceLock, RwLock};
 use std::time::{Duration, SystemTime};
 
+use chrono::{DateTime, SecondsFormat, Utc};
 use tracing::{info, warn};
 
 use crate::capability::{DEFAULT_CAPABILITY_TTL, RevocationEpoch};
@@ -102,7 +105,38 @@ pub enum CapabilityError {
     UnhandledDelegation,
     /// An internal engine error (I/O, parse failure, etc.).
     #[error("policy engine error: {0}")]
-    EngineError(String),
+    EngineError(#[source] Box<dyn Error + Send + Sync>),
+}
+
+impl CapabilityError {
+    /// Wrap a human-readable engine failure while preserving an error source.
+    pub fn engine_error(message: impl Into<String>) -> Self {
+        Self::EngineError(Box::new(EngineMessageError(message.into())))
+    }
+
+    /// Wrap an existing engine failure source.
+    pub fn engine_error_source(error: impl Error + Send + Sync + 'static) -> Self {
+        Self::EngineError(Box::new(error))
+    }
+}
+
+#[derive(Debug)]
+struct EngineMessageError(String);
+
+impl fmt::Display for EngineMessageError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl Error for EngineMessageError {}
+
+/// UTC timestamp used in audit records.
+pub type AuditTimestamp = DateTime<Utc>;
+
+/// Format an audit timestamp as RFC 3339 with millisecond precision.
+pub fn format_audit_timestamp(timestamp: &AuditTimestamp) -> String {
+    timestamp.to_rfc3339_opts(SecondsFormat::Millis, true)
 }
 
 /// A structured record of every policy decision.
@@ -118,8 +152,8 @@ pub struct AuditEvent {
     pub resource: String,
     /// The engine's verdict.
     pub result: PolicyResult,
-    /// ISO-8601 timestamp.
-    pub timestamp: String,
+    /// UTC timestamp.
+    pub timestamp: AuditTimestamp,
 }
 
 impl AuditEvent {
@@ -131,7 +165,7 @@ impl AuditEvent {
                 action = %self.action,
                 resource = %self.resource,
                 verdict = "allow",
-                ts = %self.timestamp,
+                ts = %format_audit_timestamp(&self.timestamp),
                 "policy decision"
             ),
             PolicyResult::Deny(reason) => info!(
@@ -140,7 +174,7 @@ impl AuditEvent {
                 resource = %self.resource,
                 verdict = "deny",
                 reason = %reason,
-                ts = %self.timestamp,
+                ts = %format_audit_timestamp(&self.timestamp),
                 "policy decision"
             ),
             PolicyResult::Delegate(to) => info!(
@@ -149,7 +183,7 @@ impl AuditEvent {
                 resource = %self.resource,
                 verdict = "delegate",
                 to = %to,
-                ts = %self.timestamp,
+                ts = %format_audit_timestamp(&self.timestamp),
                 "policy decision"
             ),
         }
@@ -344,7 +378,7 @@ pub fn mint_capability_for_id<P: Permission, R: Resource>(
         action: action.to_owned(),
         resource: resource_id.to_owned(),
         result: result.clone(),
-        timestamp: now_iso8601(),
+        timestamp: now_utc(),
     };
     record_audit(&event);
 
@@ -395,8 +429,8 @@ impl<P: PolicyEngine> PolicyEngine for FallbackEngine<P> {
     }
 }
 
-fn now_iso8601() -> String {
-    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+fn now_utc() -> AuditTimestamp {
+    Utc::now()
 }
 
 #[cfg(test)]
@@ -464,6 +498,33 @@ mod tests {
         let cap: Capability<CanRead, GenericResource> =
             mint_capability_with(&engine, "agent:test", &resource, &options).expect("allow");
         assert!(cap.is_expired());
+    }
+
+    #[test]
+    fn audit_timestamp_is_typed_and_formats_as_rfc3339() {
+        let event = AuditEvent {
+            subject: "agent:test".to_owned(),
+            action: "read".to_owned(),
+            resource: "reports/q1".to_owned(),
+            result: PolicyResult::Allow,
+            timestamp: Utc::now(),
+        };
+
+        let rendered = format_audit_timestamp(&event.timestamp);
+
+        assert!(rendered.ends_with('Z'));
+        assert!(rendered.contains('T'));
+    }
+
+    #[test]
+    fn engine_error_preserves_source() {
+        let err = CapabilityError::engine_error_source(std::io::Error::other("join failed"));
+
+        assert!(err.source().is_some());
+        assert_eq!(
+            err.source().map(ToString::to_string).as_deref(),
+            Some("join failed")
+        );
     }
 
     #[test]

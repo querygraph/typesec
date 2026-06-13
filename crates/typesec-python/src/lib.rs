@@ -123,6 +123,11 @@ impl TypesecGate {
 }
 
 #[pyfunction]
+/// Evaluate one policy decision by compiling the supplied policy YAML.
+///
+/// This function is convenient for one-shot checks. For repeated decisions,
+/// construct `TypesecGate` once and call its `check()`/`require()` methods so
+/// the compiled policy engine is reused.
 #[pyo3(signature = (policy_yaml, subject, action, resource, format = None, purpose = None))]
 fn check(
     policy_yaml: &str,

@@ -7,6 +7,10 @@ by release version, then by the date the logical change landed.
 
 ### 2026-06-13
 
+- Hardened runtime security internals with typed UTC audit timestamps,
+  source-preserving engine errors, zeroizing bearer tokens and credentials, and
+  Python free-function documentation that steers repeated checks to
+  `TypesecGate`.
 - Added a core `RequestContext` path for purpose/custom request metadata,
   plumbed it through policy minting, fallback/composed/lattice engines, ODRL,
   CLI checks/runs, and Python policy gates.

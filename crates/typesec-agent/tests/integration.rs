@@ -12,7 +12,7 @@
 //! 8. Typestate enforcement — documented via API design; compile-fail coverage
 //!    lives in `typesec-core/tests/compile_fail.rs`
 //! 9. Audit log — structured events captured and verified per decision
-//! 10-13. Cross-engine composition with lattice promotion and request context
+//! 10. Cross-engine composition with lattice promotion and request context
 
 use std::sync::{Arc, Mutex, OnceLock};
 

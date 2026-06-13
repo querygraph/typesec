@@ -112,9 +112,7 @@ impl SecureAgent<Authenticated> {
                 mint_capability_for_id::<P, R>(engine.as_ref(), &subject, &resource_id, &options)
             })
             .await
-            .map_err(|join_err| {
-                CapabilityError::EngineError(format!("policy check task failed: {join_err}"))
-            })??
+            .map_err(CapabilityError::engine_error_source)??
         };
 
         info!(%subject, action, %resource_id, "capability granted");

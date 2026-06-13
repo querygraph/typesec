@@ -21,6 +21,7 @@
 use std::sync::Arc;
 
 use crate::policy::PolicyEngine;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Sealed state trait for the [`Agent`] typestate machine.
 ///
@@ -53,7 +54,7 @@ impl AgentState for Authenticated {}
 /// check tokens cryptographically, not by comparison. Use
 /// [`expose`][Self::expose] at the single point where the raw secret is handed
 /// to a verifier.
-#[derive(Clone)]
+#[derive(Clone, Zeroize, ZeroizeOnDrop)]
 pub struct Token(String);
 
 impl Token {
@@ -86,7 +87,7 @@ impl std::fmt::Debug for Token {
 }
 
 /// Credentials used to authenticate an agent.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Zeroize)]
 pub struct Credentials {
     /// The agent's claimed identity.
     pub subject: String,
@@ -272,6 +273,16 @@ mod tests {
         let rendered = format!("{creds:?}");
         assert!(!rendered.contains("super-secret-bearer"));
         assert!(rendered.contains("<redacted>"));
+    }
+
+    #[test]
+    fn credentials_can_be_zeroized() {
+        let mut creds = Credentials::new("agent:test", "super-secret-bearer");
+
+        creds.zeroize();
+
+        assert!(creds.subject.is_empty());
+        assert!(creds.token.is_empty());
     }
 
     #[test]
