@@ -15,6 +15,9 @@ by release version, then by the date the logical change landed.
 - Added DID key rotation for `Ed25519DidKeyStore`, including active key version
   reporting, rotation-aware DID documents, in-flight verification for previous
   keys, and retired-key rejection.
+- Added a `ToolRegistry` for named `ProtectedTool` discovery and erased
+  invocation, and tightened protected-tool runtime checks for subject, resource,
+  and capability freshness.
 - Added RBAC wildcard subject assignments with compiled glob validation, typed
   ODRL constraint operands, prohibition-overridden ODRL audit events, and
   snake_case role names for multiword `policy!` roles.

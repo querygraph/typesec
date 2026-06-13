@@ -3,6 +3,9 @@
 /// Error type for task execution failures.
 #[derive(Debug, thiserror::Error)]
 pub enum TaskError {
+    /// No registered tool has the requested name.
+    #[error("unknown tool: {0}")]
+    UnknownTool(String),
     /// The action itself returned an error.
     #[error("task error: {0}")]
     ActionFailed(String),

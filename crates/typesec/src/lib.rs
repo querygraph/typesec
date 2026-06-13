@@ -41,7 +41,9 @@ pub mod integrations {
 }
 
 #[cfg(feature = "agent")]
-pub use typesec_agent::{AgentBuilder, SecureAgent, TaskResult};
+pub use typesec_agent::{
+    AgentBuilder, ProtectedTool, SecureAgent, TaskResult, ToolFuture, ToolRegistry, ToolSpec,
+};
 #[cfg(feature = "integrations")]
 pub use typesec_integrations::{
     ArcadeToolAuthEngine, Did, DidEnvelope, DidMessageGateway, DidOllamaClient, Ed25519DidKey,

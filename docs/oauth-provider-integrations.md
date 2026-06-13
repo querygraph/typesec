@@ -99,7 +99,9 @@ permission and resource, then refuses to invoke unless the caller supplies the
 matching typed capability.
 
 ```rust
-use typesec::{CanExecute, Capability, Credentials, ProtectedTool, SecureAgent, ToolFuture};
+use typesec::{
+    CanExecute, Capability, Credentials, ProtectedTool, SecureAgent, ToolFuture, ToolRegistry,
+};
 use typesec::resource::GenericResource;
 
 fn gmail_list(_resource: &GenericResource) -> ToolFuture<'_> {
@@ -122,6 +124,16 @@ let agent = SecureAgent::new(engine)
 let cap: Capability<CanExecute, GenericResource> =
     agent.request_capability(&GenericResource::new("gmail/list", "tool")).await?;
 tool.invoke(&agent, &cap).await?;
+```
+
+For agent or MCP-style discovery, register protected tools centrally:
+
+```rust
+let mut registry = ToolRegistry::new();
+registry.register(tool);
+
+let specs = registry.list_specs(); // names, descriptions, required permissions
+registry.invoke("gmail.list", &agent, &cap).await?;
 ```
 
 The important property is unchanged: provider checks remain runtime decisions,

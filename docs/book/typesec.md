@@ -1018,7 +1018,10 @@ The `execute` method captures the project's main ergonomic pattern. It takes a
 capability reference and a resource reference, logs the execution, and then runs
 the action. The newer `ProtectedTool` wrapper applies the same idea to
 agent-tool and MCP-style handlers: the tool advertises a required permission and
-resource, and `invoke` requires the matching `Capability<P, R>`.
+resource, and `invoke` requires the matching `Capability<P, R>`. A
+`ToolRegistry` can hold multiple protected tools, list their specs for
+discovery, and invoke one by name after downcasting the supplied capability back
+to the tool's typed proof.
 
 ```rust
 let tool = ProtectedTool::<CanExecute, _, _>::new(
@@ -1029,6 +1032,11 @@ let tool = ProtectedTool::<CanExecute, _, _>::new(
 );
 
 tool.invoke(&agent, &execute_cap).await?;
+
+let mut registry = ToolRegistry::new();
+registry.register(tool);
+let specs = registry.list_specs();
+registry.invoke("gmail.list", &agent, &execute_cap).await?;
 ```
 
 The underlying `execute` method runs an async closure. The closure cannot be
