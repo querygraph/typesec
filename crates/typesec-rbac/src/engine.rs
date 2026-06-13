@@ -297,4 +297,25 @@ assignments:
             PolicyResult::Deny(_)
         ));
     }
+
+    #[test]
+    fn cyclic_role_inheritance_fails_engine_construction() {
+        let yaml = r#"
+roles:
+  - name: a
+    inherits: [b]
+    permissions: [read]
+    resources: ["*"]
+  - name: b
+    inherits: [a]
+    permissions: [write]
+    resources: ["*"]
+
+assignments:
+  - subject: "agent:x"
+    roles: [a]
+"#;
+
+        assert!(RbacEngine::from_yaml(yaml).is_err());
+    }
 }

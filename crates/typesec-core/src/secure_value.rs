@@ -67,6 +67,9 @@ pub trait Join<Rhs: PrivacyLevel>: PrivacyLevel {
     type Output: PrivacyLevel;
 }
 
+/// Resulting value type when two protected values are zipped.
+pub type ZippedSecureValue<L, M, T, U, R> = SecureValue<<L as Join<M>>::Output, (T, U), R>;
+
 macro_rules! impl_join {
     ($left:ty, $right:ty => $out:ty) => {
         impl Join<$right> for $left {
@@ -110,6 +113,21 @@ pub enum SecureAccessError {
         capability_resource: String,
         /// Resource id the protected value is tied to.
         value_resource: String,
+    },
+}
+
+/// Error returned when protected values cannot be safely combined.
+#[derive(Debug, thiserror::Error)]
+pub enum SecureValueError {
+    /// The two values came from different resource instances.
+    #[error(
+        "cannot combine protected values from resources '{left_resource}' and '{right_resource}'"
+    )]
+    ResourceIdMismatch {
+        /// Resource id of the left value.
+        left_resource: String,
+        /// Resource id of the right value.
+        right_resource: String,
     },
 }
 
@@ -164,22 +182,30 @@ impl<L: PrivacyLevel, T, R: Resource> SecureValue<L, T, R> {
 
     /// Combine two protected values and keep the more restrictive label.
     ///
-    /// Both values must be tied to the same resource type. The resulting runtime
-    /// resource id is taken from `self`, so callers that combine multiple records
-    /// should use a domain resource type whose id represents that aggregate.
+    /// Both values must be tied to the same resource type and the same runtime
+    /// resource id. Callers that combine multiple records should use a domain
+    /// resource type whose id represents that aggregate.
+    #[must_use = "zipping protected values can fail when resource ids differ"]
     pub fn zip<M: PrivacyLevel, U>(
         self,
         other: SecureValue<M, U, R>,
-    ) -> SecureValue<<L as Join<M>>::Output, (T, U), R>
+    ) -> Result<ZippedSecureValue<L, M, T, U, R>, SecureValueError>
     where
         L: Join<M>,
     {
-        SecureValue {
+        if self.resource_id != other.resource_id {
+            return Err(SecureValueError::ResourceIdMismatch {
+                left_resource: self.resource_id,
+                right_resource: other.resource_id,
+            });
+        }
+
+        Ok(SecureValue {
             value: (self.value, other.value),
             resource_id: self.resource_id,
             _label: PhantomData,
             _resource: PhantomData,
-        }
+        })
     }
 
     /// Reveal protected data with sensitive-read authority.
@@ -188,6 +214,7 @@ impl<L: PrivacyLevel, T, R: Resource> SecureValue<L, T, R> {
     /// this value is tied to — a capability for `customer/2` cannot reveal
     /// data protected under `customer/1`, even though both share the resource
     /// type `R`.
+    #[must_use = "revealing protected data can fail and returns the protected value"]
     pub fn reveal(
         self,
         capability: &Capability<CanReadSensitive, R>,
@@ -201,6 +228,7 @@ impl<L: PrivacyLevel, T, R: Resource> SecureValue<L, T, R> {
     ///
     /// Like [`reveal`][Self::reveal], the capability's resource id must match
     /// the protected value's resource id.
+    #[must_use = "declassification can fail and returns a relabeled value"]
     pub fn declassify(
         self,
         capability: &Capability<CanDeclassify, R>,
@@ -279,9 +307,28 @@ mod tests {
         let secret: SecureValue<Secret, &str, GenericResource> =
             SecureValue::protect("token", &resource);
 
-        let combined: SecureValue<Secret, (u32, &str), GenericResource> = public.zip(secret);
+        let combined: SecureValue<Secret, (u32, &str), GenericResource> =
+            public.zip(secret).expect("same resource id");
 
         assert_eq!(combined.resource_id(), "customer/1");
+    }
+
+    #[test]
+    fn zip_rejects_different_resource_ids() {
+        let left_resource = GenericResource::new("customer/1", "customer");
+        let right_resource = GenericResource::new("customer/2", "customer");
+        let public: SecureValue<Public, u32, GenericResource> =
+            SecureValue::protect(7, &left_resource);
+        let secret: SecureValue<Secret, &str, GenericResource> =
+            SecureValue::protect("token", &right_resource);
+
+        assert!(matches!(
+            public.zip(secret),
+            Err(SecureValueError::ResourceIdMismatch {
+                left_resource,
+                right_resource
+            }) if left_resource == "customer/1" && right_resource == "customer/2"
+        ));
     }
 
     #[test]

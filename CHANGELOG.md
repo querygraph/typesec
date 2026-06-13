@@ -5,6 +5,20 @@ by release version, then by the date the logical change landed.
 
 ## Unreleased
 
+### 2026-06-13
+
+- Cached compiled policy engines inside the Python `TypesecGate` so repeated
+  checks no longer reparse policy YAML, while preserving per-call ODRL purpose
+  context.
+- Hardened `SecureValue::zip` to reject values from different resource ids
+  instead of silently inheriting the left-hand resource id.
+- Added policy decision ergonomics and guardrails: `PolicyResult` display
+  formatting, `#[must_use]` annotations for policy decisions and capability
+  use paths, audit-sink lock poisoning recovery, cheaper revocation epoch
+  atomics, and explicit agent-builder composition strategies.
+- Added regression coverage for Python RBAC/ODRL/graph gates and RBAC cyclic
+  inheritance rejection during engine construction.
+
 ## 0.6.0
 
 ### 2026-06-12

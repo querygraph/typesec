@@ -214,15 +214,29 @@ impl AgentBuilder {
     /// [`typesec_core::ComposedEngine`] directly with [`typesec_core::PolicyEngineBuilder`]
     /// and pass it to [`AgentBuilder::with_engine`].
     pub fn with_composed_engine(
-        mut self,
+        self,
         primary: Arc<dyn PolicyEngine>,
         fallback: Arc<dyn PolicyEngine>,
     ) -> Self {
-        use typesec_core::combinator::{CombineStrategy, PolicyEngineBuilder};
+        self.with_composed_engine_strategy(
+            primary,
+            fallback,
+            typesec_core::combinator::CombineStrategy::PriorityOrder,
+        )
+    }
+
+    /// Compose two engines with an explicit combination strategy.
+    pub fn with_composed_engine_strategy(
+        mut self,
+        primary: Arc<dyn PolicyEngine>,
+        fallback: Arc<dyn PolicyEngine>,
+        strategy: typesec_core::combinator::CombineStrategy,
+    ) -> Self {
+        use typesec_core::combinator::PolicyEngineBuilder;
         let engine = PolicyEngineBuilder::new()
             .add_engine(primary)
             .add_engine(fallback)
-            .strategy(CombineStrategy::PriorityOrder)
+            .strategy(strategy)
             .build();
         self.engine = Some(Arc::new(engine));
         self

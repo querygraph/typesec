@@ -31,7 +31,7 @@ impl PolicyFormat {
 }
 
 #[pyclass(frozen)]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct Decision {
     #[pyo3(get)]
     allowed: bool,
@@ -64,8 +64,7 @@ impl Decision {
 
 #[pyclass]
 struct TypesecGate {
-    yaml: String,
-    format: PolicyFormat,
+    engine: CompiledPolicyEngine,
 }
 
 #[pymethods]
@@ -74,11 +73,8 @@ impl TypesecGate {
     #[pyo3(signature = (policy_yaml, format = None))]
     fn new(policy_yaml: String, format: Option<&str>) -> PyResult<Self> {
         let format = PolicyFormat::detect(format, &policy_yaml)?;
-        validate_policy(&policy_yaml, format)?;
-        Ok(Self {
-            yaml: policy_yaml,
-            format,
-        })
+        let engine = compile_policy(&policy_yaml, format)?;
+        Ok(Self { engine })
     }
 
     #[staticmethod]
@@ -97,7 +93,12 @@ impl TypesecGate {
         resource: &str,
         purpose: Option<&str>,
     ) -> PyResult<Decision> {
-        check_policy(&self.yaml, self.format, subject, action, resource, purpose)
+        Ok(decision_from_result(
+            subject,
+            action,
+            resource,
+            self.engine.check(subject, action, resource, purpose),
+        ))
     }
 
     #[pyo3(signature = (subject, action, resource, purpose = None))]
@@ -139,26 +140,57 @@ fn check(
 #[pyo3(signature = (policy_yaml, format = None))]
 fn validate(policy_yaml: &str, format: Option<&str>) -> PyResult<()> {
     let format = PolicyFormat::detect(format, policy_yaml)?;
-    validate_policy(policy_yaml, format)
+    compile_policy(policy_yaml, format).map(|_| ())
 }
 
-fn validate_policy(yaml: &str, format: PolicyFormat) -> PyResult<()> {
+fn compile_policy(yaml: &str, format: PolicyFormat) -> PyResult<CompiledPolicyEngine> {
     match format {
         PolicyFormat::Rbac => {
-            let policy = typesec_rbac::RbacPolicy::from_yaml(yaml)
+            let engine = typesec_rbac::RbacEngine::from_yaml(yaml)
                 .map_err(|err| PyValueError::new_err(format!("RBAC YAML parse error: {err}")))?;
-            policy.validate().map_err(PyValueError::new_err)
+            Ok(CompiledPolicyEngine::Rbac(engine))
         }
         PolicyFormat::Odrl => {
-            typesec_odrl::model::OdrlDocument::from_yaml(yaml)
+            let engine = typesec_odrl::OdrlEngine::from_yaml(yaml)
                 .map_err(|err| PyValueError::new_err(format!("ODRL YAML parse error: {err}")))?;
-            Ok(())
+            Ok(CompiledPolicyEngine::Odrl(engine))
         }
         PolicyFormat::Graph => {
-            let doc = typesec_rbac::graph_policy::GraphPolicyDocument::from_yaml(yaml).map_err(
-                |err| PyValueError::new_err(format!("graph policy YAML parse error: {err}")),
-            )?;
-            doc.validate().map_err(PyValueError::new_err)
+            let engine = typesec_rbac::GraphPolicyEngine::from_yaml(yaml).map_err(|err| {
+                PyValueError::new_err(format!("graph policy YAML parse error: {err}"))
+            })?;
+            Ok(CompiledPolicyEngine::Graph(engine))
+        }
+    }
+}
+
+enum CompiledPolicyEngine {
+    Rbac(typesec_rbac::RbacEngine),
+    Odrl(typesec_odrl::OdrlEngine),
+    Graph(typesec_rbac::GraphPolicyEngine),
+}
+
+impl CompiledPolicyEngine {
+    fn check(
+        &self,
+        subject: &str,
+        action: &str,
+        resource: &str,
+        purpose: Option<&str>,
+    ) -> PolicyResult {
+        match self {
+            Self::Rbac(engine) => engine.check(subject, action, resource),
+            Self::Odrl(engine) => {
+                let ctx = purpose.map_or_else(
+                    typesec_odrl::constraint::ConstraintContext::default,
+                    |purpose| {
+                        typesec_odrl::constraint::ConstraintContext::default()
+                            .with_purpose(purpose.to_string())
+                    },
+                );
+                engine.check_with_context(subject, action, resource, &ctx)
+            }
+            Self::Graph(engine) => engine.check(subject, action, resource),
         }
     }
 }
@@ -171,32 +203,22 @@ fn check_policy(
     resource: &str,
     purpose: Option<&str>,
 ) -> PyResult<Decision> {
-    let result = match format {
-        PolicyFormat::Rbac => {
-            let engine = typesec_rbac::RbacEngine::from_yaml(yaml)
-                .map_err(|err| PyValueError::new_err(format!("RBAC YAML parse error: {err}")))?;
-            engine.check(subject, action, resource)
-        }
-        PolicyFormat::Odrl => {
-            let base = typesec_odrl::OdrlEngine::from_yaml(yaml)
-                .map_err(|err| PyValueError::new_err(format!("ODRL YAML parse error: {err}")))?;
-            let engine = if let Some(purpose) = purpose {
-                let ctx = typesec_odrl::constraint::ConstraintContext::default()
-                    .with_purpose(purpose.to_string());
-                base.with_context(ctx)
-            } else {
-                base
-            };
-            engine.check(subject, action, resource)
-        }
-        PolicyFormat::Graph => {
-            let engine =
-                typesec_rbac::GraphPolicyEngine::from_yaml(yaml).map_err(PyValueError::new_err)?;
-            engine.check(subject, action, resource)
-        }
-    };
+    let engine = compile_policy(yaml, format)?;
+    Ok(decision_from_result(
+        subject,
+        action,
+        resource,
+        engine.check(subject, action, resource, purpose),
+    ))
+}
 
-    Ok(match result {
+fn decision_from_result(
+    subject: &str,
+    action: &str,
+    resource: &str,
+    result: PolicyResult,
+) -> Decision {
+    match result {
         PolicyResult::Allow => Decision {
             allowed: true,
             subject: subject.to_string(),
@@ -218,7 +240,7 @@ fn check_policy(
             resource: resource.to_string(),
             reason: Some(format!("policy delegated to {to}")),
         },
-    })
+    }
 }
 
 #[pymodule]
@@ -228,4 +250,103 @@ fn typesec_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(check, m)?)?;
     m.add_function(wrap_pyfunction!(validate, m)?)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const RBAC: &str = include_str!("../../../policies/rbac-example.yaml");
+    const ODRL: &str = include_str!("../../../policies/odrl-example.yaml");
+    const GRAPH: &str = include_str!("../../../policies/graph-corporate-example.yaml");
+
+    #[test]
+    fn typesec_gate_rbac_allows_and_denies() {
+        let gate = TypesecGate::new(RBAC.to_string(), Some("rbac")).expect("valid rbac");
+
+        let allowed = gate
+            .check("agent:data-pipeline", "read", "reports/q1", None)
+            .expect("check ok");
+        assert!(allowed.allowed);
+
+        let denied = gate
+            .check("agent:data-pipeline", "write", "reports/q1", None)
+            .expect("check ok");
+        assert!(!denied.allowed);
+        assert!(denied.reason.is_some());
+
+        let unknown = gate
+            .check("agent:ghost", "read", "reports/q1", None)
+            .expect("check ok");
+        assert!(!unknown.allowed);
+    }
+
+    #[test]
+    fn typesec_gate_odrl_uses_per_call_purpose() {
+        let gate = TypesecGate::new(ODRL.to_string(), Some("odrl")).expect("valid odrl");
+
+        let allowed = gate
+            .check(
+                "agent:summarizer",
+                "read",
+                "customer-data",
+                Some("analytics"),
+            )
+            .expect("check ok");
+        assert!(allowed.allowed);
+
+        let delegated = gate
+            .check("agent:summarizer", "read", "customer-data", None)
+            .expect("check ok");
+        assert!(!delegated.allowed);
+        assert!(
+            delegated
+                .reason
+                .as_deref()
+                .is_some_and(|r| r.contains("delegated"))
+        );
+    }
+
+    #[test]
+    fn typesec_gate_graph_allows_basic_policy_path() {
+        let gate = TypesecGate::new(GRAPH.to_string(), Some("graph")).expect("valid graph");
+
+        let allowed = gate
+            .check("agent:executive-chief", "write", "company/strategy", None)
+            .expect("check ok");
+        assert!(allowed.allowed);
+    }
+
+    #[test]
+    fn validate_rejects_malformed_yaml() {
+        assert!(validate("roles: [", Some("rbac")).is_err());
+    }
+
+    #[test]
+    fn free_check_returns_decision() {
+        let decision = check(
+            RBAC,
+            "agent:data-pipeline",
+            "read",
+            "reports/q1",
+            Some("rbac"),
+            None,
+        )
+        .expect("check ok");
+
+        assert!(decision.allowed);
+    }
+
+    #[test]
+    fn require_raises_permission_error_on_deny() {
+        let gate = TypesecGate::new(RBAC.to_string(), Some("rbac")).expect("valid rbac");
+        let err = gate
+            .require("agent:data-pipeline", "write", "reports/q1", None)
+            .expect_err("deny should raise");
+
+        pyo3::prepare_freethreaded_python();
+        Python::with_gil(|py| {
+            assert!(err.is_instance_of::<PyPermissionError>(py));
+        });
+    }
 }

@@ -26,12 +26,13 @@
 use std::sync::{Arc, OnceLock, RwLock};
 use std::time::{Duration, SystemTime};
 
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::capability::{DEFAULT_CAPABILITY_TTL, RevocationEpoch};
 use crate::{Capability, Permission, Resource};
 
 /// The verdict returned by a policy engine.
+#[must_use = "policy decisions must be checked; an ignored result is a silent allow/deny"]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PolicyResult {
     /// The action is allowed. The engine may provide a rationale.
@@ -43,6 +44,16 @@ pub enum PolicyResult {
     /// Used in policy composition: e.g., an ODRL engine delegates to RBAC
     /// for actions not covered by any ODRL rule.
     Delegate(String),
+}
+
+impl std::fmt::Display for PolicyResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Allow => f.write_str("allow"),
+            Self::Deny(reason) => write!(f, "deny: {reason}"),
+            Self::Delegate(to) => write!(f, "delegate to {to}"),
+        }
+    }
 }
 
 /// Error type for capability acquisition failures.
@@ -142,15 +153,20 @@ fn audit_sink_cell() -> &'static RwLock<Arc<dyn AuditSink>> {
 ///
 /// All subsequent [`mint_capability`] decisions are recorded through `sink`.
 pub fn set_audit_sink(sink: Arc<dyn AuditSink>) {
-    *audit_sink_cell().write().expect("audit sink lock poisoned") = sink;
+    let mut guard = audit_sink_cell().write().unwrap_or_else(|poisoned| {
+        warn!("audit sink lock was poisoned; recovering inner sink");
+        poisoned.into_inner()
+    });
+    *guard = sink;
 }
 
 /// Record an event through the configured audit sink.
 pub(crate) fn record_audit(event: &AuditEvent) {
-    audit_sink_cell()
-        .read()
-        .expect("audit sink lock poisoned")
-        .record(event);
+    let guard = audit_sink_cell().read().unwrap_or_else(|poisoned| {
+        warn!("audit sink lock was poisoned; recovering inner sink");
+        poisoned.into_inner()
+    });
+    guard.record(event);
 }
 
 /// The core runtime policy interface.
@@ -203,6 +219,7 @@ pub trait PolicyEngine: Send + Sync {
 /// `Capability::new_unchecked` is `pub(crate)`. Only code inside `typesec-core`
 /// can call it. This function is that single gated path — it calls the policy
 /// engine, logs the verdict, and only creates a capability on `Allow`.
+#[must_use = "capability minting can fail and the returned proof should be used"]
 pub fn mint_capability<P: Permission, R: Resource>(
     engine: &dyn PolicyEngine,
     subject: &str,
@@ -242,6 +259,7 @@ impl Default for MintOptions {
 }
 
 /// Like [`mint_capability`], but with explicit lease parameters.
+#[must_use = "capability minting can fail and the returned proof should be used"]
 pub fn mint_capability_with<P: Permission, R: Resource>(
     engine: &dyn PolicyEngine,
     subject: &str,
@@ -260,6 +278,7 @@ pub fn mint_capability_with<P: Permission, R: Resource>(
 /// had been used: every consumption site (`execute`, `reveal`, `declassify`)
 /// still compares ids at use time, so naming a mismatched `R` type buys an
 /// attacker nothing — the capability only covers the id the engine approved.
+#[must_use = "capability minting can fail and the returned proof should be used"]
 pub fn mint_capability_for_id<P: Permission, R: Resource>(
     engine: &dyn PolicyEngine,
     subject: &str,

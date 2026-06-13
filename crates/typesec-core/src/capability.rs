@@ -72,12 +72,12 @@ impl RevocationEpoch {
     /// Capabilities minted *after* this call remain valid (until the next bump
     /// or their TTL, whichever comes first).
     pub fn revoke_all(&self) {
-        self.0.fetch_add(1, Ordering::SeqCst);
+        self.0.fetch_add(1, Ordering::AcqRel);
     }
 
     /// The current epoch value.
     pub fn current(&self) -> u64 {
-        self.0.load(Ordering::SeqCst)
+        self.0.load(Ordering::Acquire)
     }
 }
 
@@ -244,6 +244,7 @@ impl<P: Permission, R: Resource> Capability<P, R> {
     }
 
     /// Validate that this capability can still be used (not expired, not revoked).
+    #[must_use = "capability use must stop when this returns an error"]
     pub fn ensure_active(&self) -> Result<(), CapabilityUseError> {
         if self.is_expired() {
             return Err(CapabilityUseError::Expired {
