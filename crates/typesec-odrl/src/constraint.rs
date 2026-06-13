@@ -5,6 +5,7 @@
 
 use chrono::{DateTime, Utc};
 use tracing::debug;
+use typesec_core::policy::RequestContext;
 
 use crate::model::{ConstraintOperator, OdrlConstraint};
 
@@ -43,6 +44,16 @@ impl ConstraintContext {
 
     fn effective_now(&self) -> DateTime<Utc> {
         self.now.unwrap_or_else(Utc::now)
+    }
+}
+
+impl From<&RequestContext> for ConstraintContext {
+    fn from(ctx: &RequestContext) -> Self {
+        Self {
+            purpose: ctx.purpose.clone(),
+            now: None,
+            custom: ctx.custom.clone(),
+        }
     }
 }
 

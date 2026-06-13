@@ -41,7 +41,7 @@ use crate::{
         AiCanExfiltrate, AiCanInfer, AiCanTrain, CanDeclassify, CanDelegate, CanDelete, CanRead,
         CanReadSensitive, CanWrite, CanWriteSensitive,
     },
-    policy::{PolicyEngine, PolicyResult},
+    policy::{PolicyEngine, PolicyResult, RequestContext},
 };
 
 // ── Implies<Q> trait ──────────────────────────────────────────────────────────
@@ -155,6 +155,9 @@ impl<P: Permission, R: Resource> Capability<P, R> {
 ///
 /// For example, if the inner engine grants `write` but not `read`, a request
 /// for `read` is promoted to `Allow` because `CanWrite` implies `CanRead`.
+/// Wrapping a remote or otherwise slow engine can amplify call volume: a direct
+/// denial is followed by checks for each higher permission returned by
+/// [`implied_by`]. The engine short-circuits on the first successful promotion.
 ///
 /// # Audit trail
 ///
@@ -173,10 +176,23 @@ impl LatticeEngine {
 
 impl PolicyEngine for LatticeEngine {
     fn check(&self, subject: &str, action: &str, resource: &str) -> PolicyResult {
+        self.check_with_context(subject, action, resource, &RequestContext::default())
+    }
+
+    fn check_with_context(
+        &self,
+        subject: &str,
+        action: &str,
+        resource: &str,
+        ctx: &RequestContext,
+    ) -> PolicyResult {
         debug!(subject, action, resource, "lattice engine check");
 
         // First try the direct request.
-        match self.inner.check(subject, action, resource) {
+        match self
+            .inner
+            .check_with_context(subject, action, resource, ctx)
+        {
             PolicyResult::Allow => PolicyResult::Allow,
             original => {
                 // Try every permission that implies `action` in the lattice.
@@ -185,7 +201,11 @@ impl PolicyEngine for LatticeEngine {
                         subject,
                         action, higher, resource, "testing lattice promotion"
                     );
-                    if self.inner.check(subject, higher, resource) == PolicyResult::Allow {
+                    if self
+                        .inner
+                        .check_with_context(subject, higher, resource, ctx)
+                        == PolicyResult::Allow
+                    {
                         info!(
                             subject,
                             action,
@@ -208,11 +228,18 @@ impl PolicyEngine for LatticeEngine {
 /// These are the "upward covers" — permissions strictly higher in the partial
 /// order that directly or transitively imply the given one. Derived from the
 /// same `lattice!` table as the typed `Implies` impls, so the two cannot drift.
-fn implied_by(permission: &str) -> impl Iterator<Item = &'static str> + '_ {
+pub fn implied_by(permission: &str) -> impl Iterator<Item = &'static str> + '_ {
     IMPLICATIONS
         .iter()
         .filter(move |(_, lower)| lower() == permission)
         .map(|(higher, _)| higher())
+}
+
+/// Return all explicit `(higher, lower)` implication pairs.
+pub fn implication_pairs() -> impl Iterator<Item = (&'static str, &'static str)> {
+    IMPLICATIONS
+        .iter()
+        .map(|(higher, lower)| (higher(), lower()))
 }
 
 // ── Unit tests ─────────────────────────────────────────────────────────────────
@@ -337,5 +364,47 @@ mod tests {
         let engine = LatticeEngine::new(inner);
         let result = engine.check("agent:test", "read", "data");
         assert_eq!(result, PolicyResult::Allow);
+    }
+
+    #[test]
+    fn implication_table_matches_implied_by_lookup() {
+        for (higher, lower) in implication_pairs() {
+            assert!(
+                implied_by(lower).any(|candidate| candidate == higher),
+                "{higher} should appear in implied_by({lower})"
+            );
+        }
+    }
+
+    #[test]
+    fn implication_table_has_no_cycles() {
+        let pairs: Vec<_> = implication_pairs().collect();
+        for (higher, lower) in &pairs {
+            assert_ne!(higher, lower, "permission cannot imply itself explicitly");
+            assert!(
+                !pairs.iter().any(
+                    |(candidate_higher, candidate_lower)| candidate_higher == lower
+                        && candidate_lower == higher
+                ),
+                "cycle found between {higher} and {lower}"
+            );
+        }
+    }
+
+    #[test]
+    fn implication_table_contains_transitive_closure() {
+        let pairs: Vec<_> = implication_pairs().collect();
+        for (a, b) in &pairs {
+            for (candidate_b, c) in &pairs {
+                if b == candidate_b {
+                    assert!(
+                        pairs
+                            .iter()
+                            .any(|(candidate_a, candidate_c)| candidate_a == a && candidate_c == c),
+                        "missing transitive implication {a} => {c} via {b}"
+                    );
+                }
+            }
+        }
     }
 }

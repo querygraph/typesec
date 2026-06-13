@@ -28,7 +28,7 @@ use std::sync::Arc;
 
 use tracing::debug;
 
-use crate::policy::{PolicyEngine, PolicyResult};
+use crate::policy::{PolicyEngine, PolicyResult, RequestContext};
 
 // ── CombineStrategy ──────────────────────────────────────────────────────────
 
@@ -80,6 +80,16 @@ impl ComposedEngine {
 
 impl PolicyEngine for ComposedEngine {
     fn check(&self, subject: &str, action: &str, resource: &str) -> PolicyResult {
+        self.check_with_context(subject, action, resource, &RequestContext::default())
+    }
+
+    fn check_with_context(
+        &self,
+        subject: &str,
+        action: &str,
+        resource: &str,
+        ctx: &RequestContext,
+    ) -> PolicyResult {
         debug!(
             subject,
             action,
@@ -91,12 +101,16 @@ impl PolicyEngine for ComposedEngine {
 
         match self.strategy {
             CombineStrategy::PriorityOrder => {
-                priority_order(&self.engines, subject, action, resource)
+                priority_order(&self.engines, subject, action, resource, ctx)
             }
-            CombineStrategy::AllowIfAll => allow_if_all(&self.engines, subject, action, resource),
-            CombineStrategy::AllowIfAny => allow_if_any(&self.engines, subject, action, resource),
+            CombineStrategy::AllowIfAll => {
+                allow_if_all(&self.engines, subject, action, resource, ctx)
+            }
+            CombineStrategy::AllowIfAny => {
+                allow_if_any(&self.engines, subject, action, resource, ctx)
+            }
             CombineStrategy::DenyOverrides => {
-                deny_overrides(&self.engines, subject, action, resource)
+                deny_overrides(&self.engines, subject, action, resource, ctx)
             }
         }
     }
@@ -109,9 +123,10 @@ fn priority_order(
     subject: &str,
     action: &str,
     resource: &str,
+    ctx: &RequestContext,
 ) -> PolicyResult {
     for engine in engines {
-        match engine.check(subject, action, resource) {
+        match engine.check_with_context(subject, action, resource, ctx) {
             PolicyResult::Delegate(_) => continue,
             result => return result,
         }
@@ -124,25 +139,28 @@ fn allow_if_all(
     subject: &str,
     action: &str,
     resource: &str,
+    ctx: &RequestContext,
 ) -> PolicyResult {
     let mut any_definitive = false;
+    let mut deny_reasons: Vec<String> = Vec::new();
 
     for engine in engines {
-        match engine.check(subject, action, resource) {
+        match engine.check_with_context(subject, action, resource, ctx) {
             PolicyResult::Allow => {
                 any_definitive = true;
             }
             PolicyResult::Delegate(_) => {
                 // Abstain — skip this engine.
             }
-            deny @ PolicyResult::Deny(_) => {
-                // A single Deny breaks unanimous consent.
-                return deny;
+            PolicyResult::Deny(reason) => {
+                deny_reasons.push(reason);
             }
         }
     }
 
-    if any_definitive {
+    if !deny_reasons.is_empty() {
+        PolicyResult::Deny(deny_reasons.join("; "))
+    } else if any_definitive {
         PolicyResult::Allow
     } else {
         PolicyResult::Delegate("all engines delegated".into())
@@ -154,11 +172,12 @@ fn allow_if_any(
     subject: &str,
     action: &str,
     resource: &str,
+    ctx: &RequestContext,
 ) -> PolicyResult {
     let mut last_deny: Option<PolicyResult> = None;
 
     for engine in engines {
-        match engine.check(subject, action, resource) {
+        match engine.check_with_context(subject, action, resource, ctx) {
             PolicyResult::Allow => return PolicyResult::Allow,
             deny @ PolicyResult::Deny(_) => {
                 last_deny = Some(deny);
@@ -175,12 +194,13 @@ fn deny_overrides(
     subject: &str,
     action: &str,
     resource: &str,
+    ctx: &RequestContext,
 ) -> PolicyResult {
     let mut any_allow = false;
     let mut first_deny: Option<String> = None;
 
     for engine in engines {
-        match engine.check(subject, action, resource) {
+        match engine.check_with_context(subject, action, resource, ctx) {
             PolicyResult::Allow => {
                 any_allow = true;
             }
@@ -335,6 +355,20 @@ mod tests {
             .strategy(CombineStrategy::AllowIfAll)
             .build();
         assert!(matches!(e.check("s", "a", "r"), PolicyResult::Deny(_)));
+    }
+
+    #[test]
+    fn allow_if_all_collects_all_denial_reasons() {
+        let e = PolicyEngineBuilder::new()
+            .add_engine(deny("first"))
+            .add_engine(deny("second"))
+            .strategy(CombineStrategy::AllowIfAll)
+            .build();
+        let result = e.check("s", "a", "r");
+
+        assert!(
+            matches!(result, PolicyResult::Deny(reason) if reason.contains("first") && reason.contains("second"))
+        );
     }
 
     #[test]

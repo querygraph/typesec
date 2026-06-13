@@ -1,0 +1,24 @@
+error[E0277]: the trait bound `CanRead: Implies<_>` is not satisfied
+ --> tests/ui/coerce_requires_implies.rs:4:9
+  |
+4 |     cap.coerce()
+  |         ^^^^^^ the trait `Implies<_>` is not implemented for `CanRead`
+  |
+  = help: the following other types implement trait `Implies<Q>`:
+            `AiCanExfiltrate` implements `Implies<AiCanInfer>`
+            `AiCanExfiltrate` implements `Implies<CanRead>`
+            `AiCanTrain` implements `Implies<AiCanInfer>`
+            `AiCanTrain` implements `Implies<CanRead>`
+            `CanDeclassify` implements `Implies<CanRead>`
+            `CanDeclassify` implements `Implies<CanReadSensitive>`
+            `CanDelegate` implements `Implies<CanRead>`
+            `CanDelete` implements `Implies<CanRead>`
+          and $N others
+note: required by a bound in `lattice::<impl typesec_core::Capability<P, R>>::coerce`
+ --> src/lattice.rs
+  |
+  |     pub fn coerce<Q: Permission>(self) -> Capability<Q, R>
+  |            ------ required by a bound in this associated function
+  |     where
+  |         P: Implies<Q>,
+  |            ^^^^^^^^^^ required by this bound in `lattice::<impl Capability<P, R>>::coerce`

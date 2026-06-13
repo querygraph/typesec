@@ -4,7 +4,7 @@ use anyhow::Result;
 use clap::Args;
 use serde::Serialize;
 use std::path::PathBuf;
-use typesec_core::policy::{PolicyEngine, PolicyResult};
+use typesec_core::policy::{PolicyEngine, PolicyResult, RequestContext};
 
 #[derive(Args)]
 pub struct CheckArgs {
@@ -40,29 +40,40 @@ pub struct CheckArgs {
 pub fn run(args: CheckArgs) -> Result<()> {
     let yaml = std::fs::read_to_string(&args.policy)?;
     let format = detect_format(&args.format, &yaml);
+    let context = args
+        .purpose
+        .as_ref()
+        .map_or_else(RequestContext::default, |purpose| {
+            RequestContext::default().with_purpose(purpose.clone())
+        });
 
     let result = match format.as_deref() {
         Some("rbac") => {
             let engine =
                 typesec_rbac::RbacEngine::from_yaml(&yaml).map_err(|e| anyhow::anyhow!(e))?;
-            engine.check(&args.subject, &args.action, &args.resource)
+            PolicyEngine::check_with_context(
+                &engine,
+                &args.subject,
+                &args.action,
+                &args.resource,
+                &context,
+            )
         }
         Some("odrl") => {
-            let base =
+            let engine =
                 typesec_odrl::OdrlEngine::from_yaml(&yaml).map_err(|e| anyhow::anyhow!(e))?;
-            let engine = if let Some(purpose) = &args.purpose {
-                let ctx = typesec_odrl::constraint::ConstraintContext::default()
-                    .with_purpose(purpose.clone());
-                base.with_context(ctx)
-            } else {
-                base
-            };
-            engine.check(&args.subject, &args.action, &args.resource)
+            PolicyEngine::check_with_context(
+                &engine,
+                &args.subject,
+                &args.action,
+                &args.resource,
+                &context,
+            )
         }
         Some("graph") => {
             let engine = typesec_rbac::GraphPolicyEngine::from_yaml(&yaml)
                 .map_err(|e| anyhow::anyhow!(e))?;
-            engine.check(&args.subject, &args.action, &args.resource)
+            engine.check_with_context(&args.subject, &args.action, &args.resource, &context)
         }
         _ => anyhow::bail!(
             "Could not detect policy format. Use --format rbac, --format odrl, or --format graph"

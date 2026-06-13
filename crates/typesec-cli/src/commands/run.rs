@@ -4,7 +4,7 @@ use anyhow::Result;
 use clap::Args;
 use std::{path::PathBuf, sync::Arc};
 use typesec_agent::SecureAgent;
-use typesec_core::Credentials;
+use typesec_core::{Credentials, RequestContext};
 
 #[derive(Args)]
 pub struct RunArgs {
@@ -36,6 +36,12 @@ pub struct RunArgs {
 pub async fn run(args: RunArgs) -> Result<()> {
     let yaml = std::fs::read_to_string(&args.policy)?;
     let format = detect_format(&args.format, &yaml);
+    let context = args
+        .purpose
+        .as_ref()
+        .map_or_else(RequestContext::default, |purpose| {
+            RequestContext::default().with_purpose(purpose.clone())
+        });
 
     let engine: Arc<dyn typesec_core::policy::PolicyEngine> = match format.as_deref() {
         Some("rbac") => {
@@ -43,15 +49,8 @@ pub async fn run(args: RunArgs) -> Result<()> {
             Arc::new(e)
         }
         Some("odrl") => {
-            let base =
+            let engine =
                 typesec_odrl::OdrlEngine::from_yaml(&yaml).map_err(|e| anyhow::anyhow!(e))?;
-            let engine = if let Some(purpose) = &args.purpose {
-                let ctx = typesec_odrl::constraint::ConstraintContext::default()
-                    .with_purpose(purpose.clone());
-                base.with_context(ctx)
-            } else {
-                base
-            };
             Arc::new(engine)
         }
         _ => anyhow::bail!("Could not detect policy format"),
@@ -82,18 +81,27 @@ pub async fn run(args: RunArgs) -> Result<()> {
                 &agent,
                 "read",
                 &resource_id,
+                &context,
                 "Task: summarize/read completed",
             )
             .await;
         }
         "write" => {
-            simulate_task(&agent, "write", &resource_id, "Task: write completed").await;
+            simulate_task(
+                &agent,
+                "write",
+                &resource_id,
+                &context,
+                "Task: write completed",
+            )
+            .await;
         }
         "infer" => {
             simulate_task(
                 &agent,
                 "ai:infer",
                 &resource_id,
+                &context,
                 "Task: AI inference completed",
             )
             .await;
@@ -103,6 +111,7 @@ pub async fn run(args: RunArgs) -> Result<()> {
                 &agent,
                 "ai:exfiltrate",
                 &resource_id,
+                &context,
                 "Task: exfiltrate (DANGEROUS!)",
             )
             .await;
@@ -125,6 +134,7 @@ async fn simulate_task(
     agent: &SecureAgent<typesec_core::typestate::Authenticated>,
     action: &str,
     resource_id: &str,
+    context: &RequestContext,
     success_message: &str,
 ) {
     use typesec_core::policy::PolicyResult;
@@ -132,7 +142,7 @@ async fn simulate_task(
     println!("Requesting: action='{action}' on '{resource_id}'");
 
     let engine = agent.engine();
-    let result = engine.check(agent.subject(), action, resource_id);
+    let result = engine.check_with_context(agent.subject(), action, resource_id, context);
 
     match result {
         PolicyResult::Allow => {

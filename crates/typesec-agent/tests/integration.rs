@@ -9,8 +9,10 @@
 //! 5. ODRL purpose constraint — matching purpose allows, wrong purpose delegates
 //! 6. Combinator DenyOverrides — RBAC allow + ODRL prohibition → Deny
 //! 7. Combinator AllowIfAny — RBAC deny + ODRL permission → Allow
-//! 8. Typestate enforcement — documented via API design (no compile_fail harness needed)
+//! 8. Typestate enforcement — documented via API design; compile-fail coverage
+//!    lives in `typesec-core/tests/compile_fail.rs`
 //! 9. Audit log — structured events captured and verified per decision
+//! 10-13. Cross-engine composition with lattice promotion and request context
 
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -22,7 +24,7 @@ use tracing_subscriber::{
 };
 use typesec_agent::SecureAgent;
 use typesec_core::{
-    Capability, Credentials, PolicyEngine,
+    Capability, Credentials, PolicyEngine, RequestContext,
     combinator::{CombineStrategy, PolicyEngineBuilder},
     lattice::LatticeEngine,
     permissions::{CanRead, CanWrite},
@@ -130,6 +132,35 @@ policies:
         assignee: "agent:odrl-only"
         action: read
         target: "private/data"
+"#;
+
+/// ODRL: `agent:combinator` may read `shared/data`.
+const ODRL_ALLOW_SHARED_READ: &str = r#"
+policies:
+  - uid: "policy:shared-permit"
+    type: Set
+    rules:
+      - type: permission
+        assigner: "org:acme"
+        assignee: "agent:combinator"
+        action: read
+        target: "shared/data"
+"#;
+
+/// ODRL: `agent:combinator` is prohibited from training-purpose reads.
+const ODRL_PROHIBIT_TRAINING_READ: &str = r#"
+policies:
+  - uid: "policy:training-prohibit"
+    type: Set
+    rules:
+      - type: prohibition
+        assignee: "agent:combinator"
+        action: read
+        target: "shared/data"
+        constraints:
+          - leftOperand: purpose
+            operator: eq
+            rightOperand: "training"
 "#;
 
 /// RBAC: has no rules for `agent:odrl-only` (they're not assigned any role).
@@ -381,12 +412,106 @@ async fn test_07_combinator_allow_if_any() {
     );
 }
 
+#[tokio::test]
+async fn test_10_lattice_wraps_composed_engine_and_promotes_rbac_grant() {
+    let odrl: Arc<dyn typesec_core::PolicyEngine> =
+        Arc::new(OdrlEngine::from_yaml(ODRL_PERMIT_READ).expect("odrl"));
+    let rbac: Arc<dyn typesec_core::PolicyEngine> =
+        Arc::new(RbacEngine::from_yaml(RBAC_WRITER_ONLY).expect("rbac"));
+    let composed = PolicyEngineBuilder::new()
+        .add_engine(odrl)
+        .add_engine(rbac)
+        .strategy(CombineStrategy::PriorityOrder)
+        .build();
+    let lattice = LatticeEngine::new(Arc::new(composed));
+
+    let result = lattice.check("agent:writer", "read", "data/file.csv");
+
+    assert_eq!(
+        result,
+        PolicyResult::Allow,
+        "ODRL delegates, then RBAC write grant should promote to read"
+    );
+}
+
+#[tokio::test]
+async fn test_11_deny_overrides_preserves_odrl_request_context() {
+    let rbac: Arc<dyn typesec_core::PolicyEngine> =
+        Arc::new(RbacEngine::from_yaml(RBAC_ALLOW_READ).expect("rbac"));
+    let odrl: Arc<dyn typesec_core::PolicyEngine> =
+        Arc::new(OdrlEngine::from_yaml(ODRL_PROHIBIT_TRAINING_READ).expect("odrl"));
+    let composed = PolicyEngineBuilder::new()
+        .add_engine(rbac)
+        .add_engine(odrl)
+        .strategy(CombineStrategy::DenyOverrides)
+        .build();
+
+    let ctx = RequestContext::default().with_purpose("training");
+    let result = composed.check_with_context("agent:combinator", "read", "shared/data", &ctx);
+
+    assert!(
+        matches!(result, PolicyResult::Deny(_)),
+        "ODRL purpose prohibition should override RBAC allow"
+    );
+}
+
+#[tokio::test]
+async fn test_12_priority_order_delegates_to_rbac_allow() {
+    let odrl: Arc<dyn typesec_core::PolicyEngine> =
+        Arc::new(OdrlEngine::from_yaml(ODRL_PERMIT_READ).expect("odrl"));
+    let rbac: Arc<dyn typesec_core::PolicyEngine> =
+        Arc::new(RbacEngine::from_yaml(RBAC_ALLOW_READ).expect("rbac"));
+    let composed = PolicyEngineBuilder::new()
+        .add_engine(odrl)
+        .add_engine(rbac)
+        .strategy(CombineStrategy::PriorityOrder)
+        .build();
+
+    let result = composed.check("agent:combinator", "read", "shared/data");
+
+    assert_eq!(result, PolicyResult::Allow);
+}
+
+#[tokio::test]
+async fn test_13_allow_if_all_requires_both_engines_to_allow() {
+    let rbac: Arc<dyn typesec_core::PolicyEngine> =
+        Arc::new(RbacEngine::from_yaml(RBAC_ALLOW_READ).expect("rbac"));
+    let odrl: Arc<dyn typesec_core::PolicyEngine> =
+        Arc::new(OdrlEngine::from_yaml(ODRL_ALLOW_SHARED_READ).expect("odrl"));
+    let both_allow = PolicyEngineBuilder::new()
+        .add_engine(rbac)
+        .add_engine(odrl)
+        .strategy(CombineStrategy::AllowIfAll)
+        .build();
+
+    assert_eq!(
+        both_allow.check("agent:combinator", "read", "shared/data"),
+        PolicyResult::Allow
+    );
+
+    let rbac_deny: Arc<dyn typesec_core::PolicyEngine> =
+        Arc::new(RbacEngine::from_yaml(RBAC_NO_RULES).expect("rbac"));
+    let odrl_allow: Arc<dyn typesec_core::PolicyEngine> =
+        Arc::new(OdrlEngine::from_yaml(ODRL_PERMIT_READ).expect("odrl"));
+    let one_denies = PolicyEngineBuilder::new()
+        .add_engine(rbac_deny)
+        .add_engine(odrl_allow)
+        .strategy(CombineStrategy::AllowIfAll)
+        .build();
+
+    assert!(matches!(
+        one_denies.check("agent:odrl-only", "read", "private/data"),
+        PolicyResult::Deny(_)
+    ));
+}
+
 // ── Test 8: Typestate enforcement ─────────────────────────────────────────────
 
 /// # Compile-time typestate enforcement
 ///
-/// This test documents (but cannot mechanically verify) that the type system
-/// prevents executing actions without a corresponding capability.
+/// This test documents that the type system prevents executing actions without
+/// a corresponding capability. The compile-fail harness in `typesec-core`
+/// mechanically verifies the lower-level sealed-trait and coercion guarantees.
 ///
 /// The `SecureAgent::execute` signature is:
 ///
@@ -414,7 +539,7 @@ async fn test_07_combinator_allow_if_any() {
 #[test]
 fn test_08_typestate_enforcement_is_compile_time() {
     // This test passes trivially at runtime.
-    // The real enforcement is in the type signatures above.
+    // This agent-level enforcement is in the type signatures above.
     //
     // To see it fail at compile time, try:
     //   let agent: SecureAgent<Unauthenticated> = SecureAgent::new(engine);

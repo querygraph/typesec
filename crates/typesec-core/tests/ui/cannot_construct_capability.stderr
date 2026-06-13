@@ -1,0 +1,19 @@
+error[E0451]: fields `subject`, `resource_id`, `issued_at`, `expires_at`, `revocation`, `_permission` and `_resource` of struct `typesec_core::Capability` are private
+  --> tests/ui/cannot_construct_capability.rs:8:9
+   |
+ 7 |     let _cap: Capability<CanRead, GenericResource> = Capability {
+   |                                                      ---------- in this type
+ 8 |         subject: "agent:forged".to_string(),
+   |         ^^^^^^^ private field
+ 9 |         resource_id: "reports/q1".to_string(),
+   |         ^^^^^^^^^^^ private field
+10 |         issued_at: SystemTime::now(),
+   |         ^^^^^^^^^ private field
+11 |         expires_at: SystemTime::now(),
+   |         ^^^^^^^^^^ private field
+12 |         revocation: None::<(RevocationEpoch, u64)>,
+   |         ^^^^^^^^^^ private field
+13 |         _permission: PhantomData,
+   |         ^^^^^^^^^^^ private field
+14 |         _resource: PhantomData,
+   |         ^^^^^^^^^ private field

@@ -2,7 +2,7 @@
 
 use glob::Pattern;
 use tracing::debug;
-use typesec_core::policy::{PolicyEngine, PolicyResult};
+use typesec_core::policy::{PolicyEngine, PolicyResult, RequestContext};
 
 use crate::{
     audit::{ConstraintEval, OdrlAuditEvent, OdrlVerdict},
@@ -154,6 +154,17 @@ impl OdrlEngine {
 impl PolicyEngine for OdrlEngine {
     fn check(&self, subject: &str, action: &str, resource: &str) -> PolicyResult {
         self.check_with_context(subject, action, resource, &self.default_context)
+    }
+
+    fn check_with_context(
+        &self,
+        subject: &str,
+        action: &str,
+        resource: &str,
+        ctx: &RequestContext,
+    ) -> PolicyResult {
+        let ctx = ConstraintContext::from(ctx);
+        self.check_with_context(subject, action, resource, &ctx)
     }
 }
 

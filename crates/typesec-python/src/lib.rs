@@ -2,7 +2,7 @@
 
 use pyo3::exceptions::{PyPermissionError, PyValueError};
 use pyo3::prelude::*;
-use typesec_core::policy::{PolicyEngine, PolicyResult};
+use typesec_core::policy::{PolicyEngine, PolicyResult, RequestContext};
 
 #[derive(Clone, Copy)]
 enum PolicyFormat {
@@ -181,18 +181,18 @@ impl CompiledPolicyEngine {
         match self {
             Self::Rbac(engine) => engine.check(subject, action, resource),
             Self::Odrl(engine) => {
-                let ctx = purpose.map_or_else(
-                    typesec_odrl::constraint::ConstraintContext::default,
-                    |purpose| {
-                        typesec_odrl::constraint::ConstraintContext::default()
-                            .with_purpose(purpose.to_string())
-                    },
-                );
-                engine.check_with_context(subject, action, resource, &ctx)
+                let ctx = request_context(purpose);
+                PolicyEngine::check_with_context(engine, subject, action, resource, &ctx)
             }
             Self::Graph(engine) => engine.check(subject, action, resource),
         }
     }
+}
+
+fn request_context(purpose: Option<&str>) -> RequestContext {
+    purpose.map_or_else(RequestContext::default, |purpose| {
+        RequestContext::default().with_purpose(purpose.to_string())
+    })
 }
 
 fn check_policy(

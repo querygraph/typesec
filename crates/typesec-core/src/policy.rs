@@ -23,6 +23,7 @@
 //! subscriber to ship these to any SIEM, or install a custom sink with
 //! [`set_audit_sink`] for a guaranteed write path.
 
+use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
 use std::time::{Duration, SystemTime};
 
@@ -53,6 +54,37 @@ impl std::fmt::Display for PolicyResult {
             Self::Deny(reason) => write!(f, "deny: {reason}"),
             Self::Delegate(to) => write!(f, "delegate to {to}"),
         }
+    }
+}
+
+/// Runtime context attached to a policy decision request.
+///
+/// Plain RBAC-style engines can ignore this. Constraint-aware engines, such as
+/// ODRL, use it for values that are only known at request time.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RequestContext {
+    /// Purpose for this access request, such as `"analytics"` or `"audit"`.
+    pub purpose: Option<String>,
+    /// Custom context values keyed by constraint operand name.
+    pub custom: HashMap<String, String>,
+}
+
+impl RequestContext {
+    /// Create an empty request context.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add purpose context.
+    pub fn with_purpose(mut self, purpose: impl Into<String>) -> Self {
+        self.purpose = Some(purpose.into());
+        self
+    }
+
+    /// Add a custom key-value pair.
+    pub fn with(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.custom.insert(key.into(), value.into());
+        self
     }
 }
 
@@ -171,8 +203,9 @@ pub(crate) fn record_audit(event: &AuditEvent) {
 
 /// The core runtime policy interface.
 ///
-/// Implementors (e.g., `RbacEngine`, `OdrlEngine`) evaluate a (subject, action,
-/// resource) triple against their policy set and return a [`PolicyResult`].
+/// Implementors (e.g., `RbacEngine`, `OdrlEngine`) evaluate a
+/// (subject, action, resource, context) request against their policy set and
+/// return a [`PolicyResult`].
 ///
 /// Every implementation *must* emit an [`AuditEvent`] via `tracing` for every check.
 ///
@@ -190,6 +223,19 @@ pub trait PolicyEngine: Send + Sync {
     /// * `action` — permission name, e.g., `"read"` (matches [`Permission::name()`]).
     /// * `resource` — resource identifier, e.g., `"reports/q1"`.
     fn check(&self, subject: &str, action: &str, resource: &str) -> PolicyResult;
+
+    /// Evaluate a request with runtime context.
+    ///
+    /// Engines that do not use contextual constraints can rely on this default.
+    fn check_with_context(
+        &self,
+        subject: &str,
+        action: &str,
+        resource: &str,
+        _ctx: &RequestContext,
+    ) -> PolicyResult {
+        self.check(subject, action, resource)
+    }
 
     /// Compose this engine with a fallback.
     ///
@@ -247,6 +293,8 @@ pub struct MintOptions {
     /// invalidated mid-lease by calling [`RevocationEpoch::revoke_all`]
     /// (e.g. after a policy reload).
     pub revocation: Option<RevocationEpoch>,
+    /// Runtime context to pass into the policy engine while minting.
+    pub context: RequestContext,
 }
 
 impl Default for MintOptions {
@@ -254,6 +302,7 @@ impl Default for MintOptions {
         Self {
             ttl: DEFAULT_CAPABILITY_TTL,
             revocation: None,
+            context: RequestContext::default(),
         }
     }
 }
@@ -287,7 +336,7 @@ pub fn mint_capability_for_id<P: Permission, R: Resource>(
 ) -> Result<Capability<P, R>, CapabilityError> {
     let action = P::name();
 
-    let result = engine.check(subject, action, resource_id);
+    let result = engine.check_with_context(subject, action, resource_id, &options.context);
 
     // Emit the structured audit event for every decision, allow or deny.
     let event = AuditEvent {
@@ -324,8 +373,23 @@ pub struct FallbackEngine<P: PolicyEngine> {
 
 impl<P: PolicyEngine> PolicyEngine for FallbackEngine<P> {
     fn check(&self, subject: &str, action: &str, resource: &str) -> PolicyResult {
-        match self.primary.check(subject, action, resource) {
-            PolicyResult::Delegate(_) => self.fallback.check(subject, action, resource),
+        self.check_with_context(subject, action, resource, &RequestContext::default())
+    }
+
+    fn check_with_context(
+        &self,
+        subject: &str,
+        action: &str,
+        resource: &str,
+        ctx: &RequestContext,
+    ) -> PolicyResult {
+        match self
+            .primary
+            .check_with_context(subject, action, resource, ctx)
+        {
+            PolicyResult::Delegate(_) => self
+                .fallback
+                .check_with_context(subject, action, resource, ctx),
             other => other,
         }
     }
@@ -400,6 +464,41 @@ mod tests {
         let cap: Capability<CanRead, GenericResource> =
             mint_capability_with(&engine, "agent:test", &resource, &options).expect("allow");
         assert!(cap.is_expired());
+    }
+
+    #[test]
+    fn mint_with_request_context_passes_context_to_engine() {
+        struct PurposeEngine;
+        impl PolicyEngine for PurposeEngine {
+            fn check(&self, _: &str, _: &str, _: &str) -> PolicyResult {
+                PolicyResult::Deny("missing context".into())
+            }
+
+            fn check_with_context(
+                &self,
+                _: &str,
+                _: &str,
+                _: &str,
+                ctx: &RequestContext,
+            ) -> PolicyResult {
+                if ctx.purpose.as_deref() == Some("analytics") {
+                    PolicyResult::Allow
+                } else {
+                    PolicyResult::Deny("wrong purpose".into())
+                }
+            }
+        }
+
+        let resource = GenericResource::new("reports/q1", "report");
+        let options = MintOptions {
+            context: RequestContext::default().with_purpose("analytics"),
+            ..MintOptions::default()
+        };
+        let cap: Capability<CanRead, GenericResource> =
+            mint_capability_with(&PurposeEngine, "agent:test", &resource, &options)
+                .expect("context should allow");
+
+        assert_eq!(cap.resource_id(), "reports/q1");
     }
 
     #[test]

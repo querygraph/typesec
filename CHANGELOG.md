@@ -7,6 +7,16 @@ by release version, then by the date the logical change landed.
 
 ### 2026-06-13
 
+- Added a core `RequestContext` path for purpose/custom request metadata,
+  plumbed it through policy minting, fallback/composed/lattice engines, ODRL,
+  CLI checks/runs, and Python policy gates.
+- Added compile-fail tests for sealed permissions, sealed agent states,
+  private capability construction, and invalid upward capability coercion.
+- Added lattice invariant tests and cross-engine integration coverage for
+  lattice promotion over composed engines, request-context-aware ODRL
+  prohibitions, `PriorityOrder`, and `AllowIfAll`.
+- Improved composition observability by collecting all `AllowIfAll` denial
+  reasons and documenting lattice promotion call amplification.
 - Cached compiled policy engines inside the Python `TypesecGate` so repeated
   checks no longer reparse policy YAML, while preserving per-call ODRL purpose
   context.
