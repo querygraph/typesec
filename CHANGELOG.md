@@ -5,8 +5,13 @@ by release version, then by the date the logical change landed.
 
 ## Unreleased
 
+## 0.7.0
+
 ### 2026-06-13
 
+- Bumped workspace crate versions, internal dependency constraints, Python
+  package metadata, and user-facing dependency examples to `0.7.0`; crates are
+  prepared locally but not published.
 - Added per-capability revocation with `CapabilityId`,
   `CapabilityRevocationList`, and `MintOptions::with_revocation_list`, allowing
   one live proof to be revoked without bumping a shared revocation epoch.
