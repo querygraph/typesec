@@ -5,6 +5,9 @@ by release version, then by the date the logical change landed.
 
 ## Unreleased
 
+- Updated the `grust-graph` dependency and user-facing Grust examples from
+  `0.6.2` to `0.7.0`.
+
 ## 0.7.0
 
 ### 2026-06-13

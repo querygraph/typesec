@@ -67,7 +67,7 @@ sha2 = "0.10"
 getrandom = "0.2"
 criterion = "0.5"
 proptest = "1"
-grust-graph = { version = "0.6.2", path = "../grust/crates/grust", features = ["typed-zod-rs"] }
+grust-graph = { version = "0.7.0", path = "../grust/crates/grust", features = ["typed-zod-rs"] }
 
 [profile.release]
 lto = true

@@ -136,7 +136,7 @@ fn add_employee_node(
     builder: &mut GraphBuilder,
     employee: &Employee,
 ) {
-    builder
+    let node_id = builder
         .node("Employee", employee.id)
         .prop("name", employee.name)
         .prop("title", employee.title)
@@ -144,6 +144,7 @@ fn add_employee_node(
         .prop("level", employee.level)
         .prop("compensation_band", employee.compensation_band)
         .finish();
+    debug_assert_eq!(node_id.as_str(), employee.id);
 }
 
 fn add_reports_to_relationship(
@@ -152,11 +153,12 @@ fn add_reports_to_relationship(
     employee: &Employee,
     manager: &Employee,
 ) {
-    builder
+    let outcome = builder
         .edge("REPORTS_TO", employee.id, manager.id)
         .prop("visibility", "employee-network")
         .prop("source", "hris")
         .finish();
+    debug_assert!(outcome.written());
 }
 
 fn inspect_sensitive_network(

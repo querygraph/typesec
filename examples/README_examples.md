@@ -364,7 +364,7 @@ cargo run -p typesec-cli -- check --policy policies/graph-corporate-example.yaml
   --resource employee/private/employee:nia
 ```
 
-The graph policy loader now uses Grust 0.6 typed graph support with Zod schemas
+The graph policy loader now uses Grust 0.7 typed graph support with Zod schemas
 at the YAML/JSON boundary, and the examples write validated graphs through
 Grust's typed backend path. That means the example policy is not just parsed as
 a loose property graph: `Agent`, `Role`, and `Employee` nodes are typed,
@@ -414,7 +414,7 @@ examples/company_graph/company_graph_grust_sail.rs
 This example uses published Grust crates:
 
 ```toml
-grust-graph = { version = "0.6.2", features = ["typed-zod-rs", "sail"] }
+grust-graph = { version = "0.7.0", features = ["typed-zod-rs", "sail"] }
 ```
 
 It builds a backend-neutral property graph through the `grust` facade. If a Sail
