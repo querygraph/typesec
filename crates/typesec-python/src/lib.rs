@@ -275,98 +275,129 @@ fn typesec_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pyo3::types::{PyAny, PyModule};
 
     const RBAC: &str = include_str!("../../../policies/rbac-example.yaml");
     const ODRL: &str = include_str!("../../../policies/odrl-example.yaml");
     const GRAPH: &str = include_str!("../../../policies/graph-corporate-example.yaml");
 
     #[test]
-    fn typesec_gate_rbac_allows_and_denies() {
-        let gate = TypesecGate::new(RBAC.to_string(), Some("rbac")).expect("valid rbac");
+    fn typesec_gate_rbac_allows_and_denies() -> PyResult<()> {
+        with_module(|module| {
+            let gate = module.getattr("TypesecGate")?.call1((RBAC, "rbac"))?;
 
-        let allowed = gate
-            .check("agent:data-pipeline", "read", "reports/q1", None)
-            .expect("check ok");
-        assert!(allowed.allowed);
+            let allowed =
+                gate.call_method1("check", ("agent:data-pipeline", "read", "reports/q1"))?;
+            assert!(decision_allowed(&allowed)?);
 
-        let denied = gate
-            .check("agent:data-pipeline", "write", "reports/q1", None)
-            .expect("check ok");
-        assert!(!denied.allowed);
-        assert!(denied.reason.is_some());
+            let denied =
+                gate.call_method1("check", ("agent:data-pipeline", "write", "reports/q1"))?;
+            assert!(!decision_allowed(&denied)?);
+            assert!(decision_reason(&denied)?.is_some());
 
-        let unknown = gate
-            .check("agent:ghost", "read", "reports/q1", None)
-            .expect("check ok");
-        assert!(!unknown.allowed);
+            let unknown = gate.call_method1("check", ("agent:ghost", "read", "reports/q1"))?;
+            assert!(!decision_allowed(&unknown)?);
+
+            Ok(())
+        })
     }
 
     #[test]
-    fn typesec_gate_odrl_uses_per_call_purpose() {
-        let gate = TypesecGate::new(ODRL.to_string(), Some("odrl")).expect("valid odrl");
+    fn typesec_gate_odrl_uses_per_call_purpose() -> PyResult<()> {
+        with_module(|module| {
+            let gate = module.getattr("TypesecGate")?.call1((ODRL, "odrl"))?;
 
-        let allowed = gate
-            .check(
-                "agent:summarizer",
+            let allowed = gate.call_method1(
+                "check",
+                ("agent:summarizer", "read", "customer-data", "analytics"),
+            )?;
+            assert!(decision_allowed(&allowed)?);
+
+            let delegated =
+                gate.call_method1("check", ("agent:summarizer", "read", "customer-data"))?;
+            assert!(!decision_allowed(&delegated)?);
+            let reason = decision_reason(&delegated)?;
+            assert!(
+                reason.as_deref().is_some_and(|r| r.contains("delegated")),
+                "expected delegated reason, got {reason:?}"
+            );
+
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn typesec_gate_graph_allows_basic_policy_path() -> PyResult<()> {
+        with_module(|module| {
+            let gate = module.getattr("TypesecGate")?.call1((GRAPH, "graph"))?;
+
+            let allowed = gate.call_method1(
+                "check",
+                ("agent:executive-chief", "write", "company/strategy"),
+            )?;
+            assert!(decision_allowed(&allowed)?);
+
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn validate_rejects_malformed_yaml() -> PyResult<()> {
+        with_module(|module| {
+            let err = module
+                .getattr("validate")?
+                .call1(("roles: [", "rbac"))
+                .expect_err("malformed YAML should fail");
+            assert!(err.is_instance_of::<PyValueError>(module.py()));
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn free_check_returns_decision() -> PyResult<()> {
+        with_module(|module| {
+            let decision = module.getattr("check")?.call1((
+                RBAC,
+                "agent:data-pipeline",
                 "read",
-                "customer-data",
-                Some("analytics"),
-            )
-            .expect("check ok");
-        assert!(allowed.allowed);
+                "reports/q1",
+                "rbac",
+            ))?;
 
-        let delegated = gate
-            .check("agent:summarizer", "read", "customer-data", None)
-            .expect("check ok");
-        assert!(!delegated.allowed);
-        assert!(
-            delegated
-                .reason
-                .as_deref()
-                .is_some_and(|r| r.contains("delegated"))
-        );
+            assert!(decision_allowed(&decision)?);
+
+            Ok(())
+        })
     }
 
     #[test]
-    fn typesec_gate_graph_allows_basic_policy_path() {
-        let gate = TypesecGate::new(GRAPH.to_string(), Some("graph")).expect("valid graph");
+    fn require_raises_permission_error_on_deny() -> PyResult<()> {
+        with_module(|module| {
+            let gate = module.getattr("TypesecGate")?.call1((RBAC, "rbac"))?;
+            let err = gate
+                .call_method1("require", ("agent:data-pipeline", "write", "reports/q1"))
+                .expect_err("deny should raise");
 
-        let allowed = gate
-            .check("agent:executive-chief", "write", "company/strategy", None)
-            .expect("check ok");
-        assert!(allowed.allowed);
+            assert!(err.is_instance_of::<PyPermissionError>(module.py()));
+
+            Ok(())
+        })
     }
 
-    #[test]
-    fn validate_rejects_malformed_yaml() {
-        assert!(validate("roles: [", Some("rbac")).is_err());
-    }
-
-    #[test]
-    fn free_check_returns_decision() {
-        let decision = check(
-            RBAC,
-            "agent:data-pipeline",
-            "read",
-            "reports/q1",
-            Some("rbac"),
-            None,
-        )
-        .expect("check ok");
-
-        assert!(decision.allowed);
-    }
-
-    #[test]
-    fn require_raises_permission_error_on_deny() {
-        let gate = TypesecGate::new(RBAC.to_string(), Some("rbac")).expect("valid rbac");
-        let err = gate
-            .require("agent:data-pipeline", "write", "reports/q1", None)
-            .expect_err("deny should raise");
-
+    fn with_module(test: impl FnOnce(&Bound<'_, PyModule>) -> PyResult<()>) -> PyResult<()> {
         pyo3::prepare_freethreaded_python();
         Python::with_gil(|py| {
-            assert!(err.is_instance_of::<PyPermissionError>(py));
-        });
+            let module = PyModule::new(py, "typesec_native")?;
+            typesec_native(&module)?;
+            test(&module)
+        })
+    }
+
+    fn decision_allowed(decision: &Bound<'_, PyAny>) -> PyResult<bool> {
+        decision.getattr("allowed")?.extract()
+    }
+
+    fn decision_reason(decision: &Bound<'_, PyAny>) -> PyResult<Option<String>> {
+        decision.getattr("reason")?.extract()
     }
 }

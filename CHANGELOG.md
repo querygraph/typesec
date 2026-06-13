@@ -16,6 +16,9 @@ by release version, then by the date the logical change landed.
   collapse into interchangeable strings.
 - Added property-based permission lattice law tests with `proptest` to exercise
   runtime implication lookup, cycle prevention, and transitive-closure coverage.
+- Exercised the PyO3 `typesec_native` module surface from Rust tests so
+  `TypesecGate`, `check`, `validate`, and permission errors are verified
+  through Python-callable bindings for RBAC, ODRL, and graph policies.
 - Added `policy!` role inheritance with `role Child extends Parent`, flattening
   inherited permissions and resource patterns during macro expansion.
 - Added DID key rotation for `Ed25519DidKeyStore`, including active key version
