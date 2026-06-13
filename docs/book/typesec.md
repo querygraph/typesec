@@ -1331,6 +1331,35 @@ The Python tests exercise both the exit-code boundary and the JSON boundary, so
 the CLI contract is checked from the same subprocess seam that non-Rust agents
 use.
 
+`typesec run` can also execute a multi-agent scenario file:
+
+```yaml
+scenario:
+  name: rbac smoke
+  policy: ./policies/rbac-example.yaml
+  format: rbac
+  steps:
+    - agent: agent:data-pipeline
+      action: read
+      resource: reports/q1
+      expect: allow
+    - agent: agent:data-pipeline
+      action: write
+      resource: reports/q1
+      expect: deny
+```
+
+Run it with:
+
+```sh
+cargo run -q -p typesec-cli -- run --scenario scenario.yaml
+```
+
+The trace authenticates each listed agent with the local simulation token,
+checks the requested action/resource pair, and prints whether each optional
+`expect` value matched the actual `allow`, `deny`, or `delegate` result. Any
+expectation mismatch makes the command exit nonzero after printing the trace.
+
 # Examples
 
 Typesec includes examples at several layers: pure Rust RBAC, pure Rust ODRL,

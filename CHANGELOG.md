@@ -18,6 +18,8 @@ by release version, then by the date the logical change landed.
 - Added a `ToolRegistry` for named `ProtectedTool` discovery and erased
   invocation, and tightened protected-tool runtime checks for subject, resource,
   and capability freshness.
+- Added `typesec run --scenario` for YAML-described multi-agent traces with
+  per-step action/resource checks and optional expected results.
 - Added RBAC wildcard subject assignments with compiled glob validation, typed
   ODRL constraint operands, prohibition-overridden ODRL audit events, and
   snake_case role names for multiword `policy!` roles.

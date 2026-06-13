@@ -101,6 +101,35 @@ typesec check \
 The `check` command exits with status `0` for allow, `1` for deny, and `2` for
 delegation.
 
+## Run Multi-Agent Scenarios
+
+`typesec run --scenario` accepts a YAML flow with a policy path and ordered
+steps:
+
+```yaml
+scenario:
+  name: rbac smoke
+  policy: ./policies/rbac-example.yaml
+  format: rbac
+  steps:
+    - agent: agent:data-pipeline
+      action: read
+      resource: reports/q1
+      expect: allow
+    - agent: agent:data-pipeline
+      action: write
+      resource: reports/q1
+      expect: deny
+```
+
+```sh
+typesec run --scenario scenario.yaml
+```
+
+The trace prints each step's policy result and whether the optional `expect`
+value matched. Expectation mismatches make the command exit nonzero after the
+trace.
+
 ## `rbac_agent.rs`
 
 Path:
