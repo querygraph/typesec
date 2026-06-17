@@ -5,6 +5,12 @@ by release version, then by the date the logical change landed.
 
 ## Unreleased
 
+## 0.8.0
+
+### 2026-06-17
+
+- Bumped workspace crate versions, internal dependency constraints, Python
+  package metadata, and user-facing dependency examples to `0.8.0`.
 - Updated the local Grust facade dependency from `0.7.0` to `0.9.0`, added the
   published `grust-cypher` and `grust-sail` crates as direct dependencies, and
   added company-graph helpers and examples that apply Grust Cypher DDL
