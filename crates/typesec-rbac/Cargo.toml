@@ -17,6 +17,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 glob = { workspace = true }
 grust-graph = { workspace = true }
+grust-cypher = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true }

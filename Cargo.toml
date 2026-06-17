@@ -68,6 +68,8 @@ getrandom = "0.2"
 criterion = "0.5"
 proptest = "1"
 grust-graph = { version = "0.9.0", path = "../grust/crates/grust", features = ["typed-zod-rs"] }
+grust-cypher = { version = "0.9.0", path = "../grust/crates/grust-cypher" }
+grust-sail = { version = "0.9.0", path = "../grust/crates/grust-sail" }
 
 [profile.release]
 lto = true

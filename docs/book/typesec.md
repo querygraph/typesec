@@ -225,21 +225,24 @@ grust = { path = "../../../grust/crates/grust", features = ["sail"] }
 ```
 
 After the Grust crates were published, the dependency was moved to the
-published facade crate. The current examples use Grust 0.7 typed graph and
-typed backend support:
+published facade crate. The current examples use Grust 0.9 typed graph support,
+plus the separate `grust-cypher` crate for Cypher DDL and mutation syntax and
+the separate `grust-sail` crate for the Sail backend:
 
 ```toml
 [dev-dependencies]
-grust-graph = { version = "0.7.0", features = ["typed-zod-rs", "sail"] }
+grust-graph = { version = "0.9.0", features = ["typed-zod-rs"] }
+grust-cypher = "0.9.0"
+grust-sail = "0.9.0"
 ```
 
 The package is named `grust-graph`, while its library is imported as `grust`.
-The facade re-exports the core graph API and, with the `sail` feature enabled,
-the Sail adapter types. The `typed-zod-rs` feature lets Typesec route policy
-YAML and JSON through Zod schemas before typed Rust structs lower into a Grust
-graph. The same graph schema is then passed to Grust backends with
-`put_typed_graph`, so persistence validates the graph shape instead of accepting
-a loose property graph.
+The facade re-exports the core graph API, while `grust-sail` exposes the Sail
+adapter types directly. The `typed-zod-rs` feature lets Typesec route policy YAML
+and JSON through Zod schemas before typed Rust structs lower into a Grust graph.
+The same graph schema is then passed to Grust backends with `put_typed_graph`,
+and `grust-cypher` lets Typesec apply Cypher DDL constraints or execute an
+authorized Cypher mutation through the same graph store boundary.
 
 # `typesec-core`
 

@@ -5,9 +5,11 @@ by release version, then by the date the logical change landed.
 
 ## Unreleased
 
-- Updated the local Grust facade dependency from `0.7.0` to `0.9.0` so TypeSec
-  can rebuild against the current `/Users/alexy/src/grust` checkout during the
-  publish-chain handoff.
+- Updated the local Grust facade dependency from `0.7.0` to `0.9.0`, added the
+  published `grust-cypher` and `grust-sail` crates as direct dependencies, and
+  added company-graph helpers and examples that apply Grust Cypher DDL
+  constraints before using Cypher mutation syntax for an authorized graph write.
+- Rebuilt the book artifacts with the Grust 0.9 company-graph documentation.
 - Added audit-safe TypeDID attestations derived from verified TypeDID messages,
   giving downstream systems a payload-free proof summary to persist after
   TypeSec verifies the envelope.

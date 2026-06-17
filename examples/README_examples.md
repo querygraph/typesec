@@ -364,12 +364,15 @@ cargo run -p typesec-cli -- check --policy policies/graph-corporate-example.yaml
   --resource employee/private/employee:nia
 ```
 
-The graph policy loader now uses Grust 0.7 typed graph support with Zod schemas
+The graph policy loader now uses Grust 0.9 typed graph support with Zod schemas
 at the YAML/JSON boundary, and the examples write validated graphs through
-Grust's typed backend path. That means the example policy is not just parsed as
-a loose property graph: `Agent`, `Role`, and `Employee` nodes are typed,
-`HAS_ROLE` must connect an `Agent` to a `Role`, `REPORTS_TO` must connect
-`Employee` nodes, and strict employee schemas reject unexpected properties.
+Grust's typed backend path. The schema example also uses Grust's Cypher DDL
+surface to install portable company-graph constraints before demonstrating a
+Typesec-authorized Cypher graph mutation. That means the example policy is not
+just parsed as a loose property graph: `Agent`, `Role`, and `Employee` nodes are
+typed, `HAS_ROLE` must connect an `Agent` to a `Role`, `REPORTS_TO` must
+connect `Employee` nodes, strict employee schemas reject unexpected properties,
+and Cypher-facing writes still pass through Typesec authorization first.
 
 ### Typed Graph Policy Schema
 
@@ -384,12 +387,14 @@ This example focuses on the policy loader itself. It demonstrates:
 1. YAML graph policy loading through the typed Grust/Zod path.
 2. JSON graph policy loading through the same schema boundary.
 3. A successful authorization decision from the typed JSON policy.
-4. Persistence of the typed policy graph through `MemoryGraphStore::put_typed_graph`.
-5. Rejection of an unknown graph node label.
-6. Rejection of an extra employee property by a strict Zod schema.
-7. Rejection of a `HAS_ROLE` edge whose endpoints do not match the typed graph
+4. Application of Grust Cypher DDL constraints to the company graph schema.
+5. Persistence of the typed policy graph through `MemoryGraphStore::put_typed_graph`.
+6. A Typesec-authorized graph update expressed with Grust Cypher mutation syntax.
+7. Rejection of an unknown graph node label.
+8. Rejection of an extra employee property by a strict Zod schema.
+9. Rejection of a `HAS_ROLE` edge whose endpoints do not match the typed graph
    model.
-8. Rejection of the same endpoint mismatch by the backend `GraphSchema`.
+10. Rejection of the same endpoint mismatch by the backend `GraphSchema`.
 
 Run it:
 
@@ -414,7 +419,9 @@ examples/company_graph/company_graph_grust_sail.rs
 This example uses published Grust crates:
 
 ```toml
-grust-graph = { version = "0.7.0", features = ["typed-zod-rs", "sail"] }
+grust-graph = { version = "0.9.0", features = ["typed-zod-rs"] }
+grust-cypher = "0.9.0"
+grust-sail = "0.9.0"
 ```
 
 It builds a backend-neutral property graph through the `grust` facade. If a Sail

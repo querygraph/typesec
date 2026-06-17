@@ -37,10 +37,13 @@ same graph. Rules can then test graph predicates such as:
 - target employee level is not `Executive`.
 - a proposed `REPORTS_TO` edge would not create a cycle.
 
-The loader now routes YAML and JSON graph policies through Grust 0.7 typed graph
+The loader now routes YAML and JSON graph policies through Grust 0.9 typed graph
 support and Zod schemas before the authorization engine sees a `Graph`. The same
 company graph schema is used when examples write to Grust typed backends. The
-schema example shows the important boundary checks:
+schema example also applies Grust Cypher DDL constraints through the portable
+`GraphSchema` path, then demonstrates a Typesec-authorized graph update using
+Grust Cypher mutation syntax. The schema example shows the important boundary
+checks:
 
 - `Agent`, `Role`, and `Employee` are the accepted node labels.
 - `Employee` nodes must carry the required company fields and reject extra
@@ -50,6 +53,8 @@ schema example shows the important boundary checks:
 - YAML and JSON policies use the same typed loader.
 - `MemoryGraphStore::put_typed_graph` accepts the valid policy graph and rejects
   graphs that violate the typed backend schema.
+- Cypher DDL can install company-graph uniqueness and required-property
+  constraints without bypassing the Typesec policy gate.
 
 You can check the graph policy directly:
 

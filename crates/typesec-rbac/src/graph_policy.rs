@@ -6,10 +6,11 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use glob::Pattern;
 use grust::prelude::{
-    Direction, Field, FieldType, Graph, GraphSchema, Label, Node, NodeId, TypedEdge,
+    Direction, Field, FieldType, Graph, GraphSchema, GraphStore, Label, Node, NodeId, TypedEdge,
     TypedGraphBuilder, TypedNode, Value, garde,
     zod_rs::prelude::{object, string},
 };
+use grust_cypher::{CypherConstraintRegistry, CypherSchemaApplication, apply_cypher_ddl_to_schema};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map as JsonMap, Value as JsonValue};
 use tracing::debug;
@@ -97,6 +98,34 @@ pub fn company_graph_schema() -> GraphSchema {
             ],
         )
         .build()
+}
+
+pub const COMPANY_GRAPH_CYPHER_CONSTRAINTS: &str = r#"
+CREATE CONSTRAINT agent_id IF NOT EXISTS FOR (n:Agent) REQUIRE n.id IS UNIQUE;
+CREATE CONSTRAINT role_id IF NOT EXISTS FOR (n:Role) REQUIRE n.id IS UNIQUE;
+CREATE CONSTRAINT employee_id IF NOT EXISTS FOR (n:Employee) REQUIRE n.id IS UNIQUE;
+CREATE CONSTRAINT employee_name_required IF NOT EXISTS FOR (n:Employee) REQUIRE n.name IS NOT NULL;
+"#;
+
+pub fn company_graph_cypher_constraints() -> &'static str {
+    COMPANY_GRAPH_CYPHER_CONSTRAINTS
+}
+
+pub async fn apply_company_graph_cypher_constraints<S>(
+    store: &S,
+) -> grust::Result<CypherSchemaApplication>
+where
+    S: GraphStore + Sync,
+{
+    let schema = company_graph_schema();
+    let mut registry = CypherConstraintRegistry::from_schema(&schema);
+    apply_cypher_ddl_to_schema(
+        store,
+        &schema,
+        &mut registry,
+        company_graph_cypher_constraints(),
+    )
+    .await
 }
 
 #[derive(Debug, Clone, Deserialize)]

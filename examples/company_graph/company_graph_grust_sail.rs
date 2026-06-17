@@ -9,6 +9,7 @@
 use std::{net::TcpStream, sync::Arc};
 
 use grust::prelude::*;
+use grust_sail::{SailConfig, SailGraphStore};
 use typesec_agent::SecureAgent;
 use typesec_core::{
     Capability, Credentials, Resource,

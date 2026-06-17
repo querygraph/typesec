@@ -5,12 +5,18 @@
 //! rejects graph facts that do not match the typed policy model, and can persist
 //! the validated graph through Grust's typed backend path.
 
-use grust::prelude::{GraphStore, MemoryGraphStore};
+use grust::prelude::{GraphStore, MemoryGraphStore, Value};
+use grust_cypher::{
+    CypherMutationOptions, execute_cypher_mutation_returning_with_options_on_store,
+};
 use typesec_core::{
     ResourceId, SubjectId,
     policy::{PolicyEngine, PolicyResult},
 };
-use typesec_rbac::graph_policy::{GraphPolicyDocument, GraphPolicyEngine, company_graph_schema};
+use typesec_rbac::graph_policy::{
+    GraphPolicyDocument, GraphPolicyEngine, apply_company_graph_cypher_constraints,
+    company_graph_schema,
+};
 
 const POLICY_YAML: &str = include_str!("../../policies/graph-corporate-example.yaml");
 
@@ -87,12 +93,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("typed JSON policy grants HR write access to Nia's private employee node");
 
     let store = MemoryGraphStore::new();
+    let applied_constraints = apply_company_graph_cypher_constraints(&store).await?;
+    assert_eq!(applied_constraints.report.created, 4);
+    println!(
+        "Grust Cypher DDL applied {} company graph constraints before persistence",
+        applied_constraints.report.created
+    );
+
     let report = store
         .put_typed_graph(&schema, &yaml_doc.graph_policy.graph)
         .await?;
     println!(
         "typed memory backend accepted the policy graph: {} nodes, {} edges",
         report.nodes, report.edges
+    );
+
+    let cypher_update = execute_cypher_mutation_returning_with_options_on_store(
+        &store,
+        "MATCH (n:Employee {id: 'employee:nia'}) SET n.title = 'Staff Software Engineer' RETURN n.id AS id, n.title AS title",
+        CypherMutationOptions::default(),
+    )
+    .await?;
+    assert_eq!(cypher_update.table.columns, vec!["id", "title"]);
+    assert_eq!(
+        cypher_update.table.rows,
+        vec![vec![
+            Value::from("employee:nia"),
+            Value::from("Staff Software Engineer"),
+        ]]
+    );
+    println!(
+        "authorized HR graph write can be expressed as Grust Cypher: {:?}",
+        cypher_update.table.rows
     );
 
     expect_error(
