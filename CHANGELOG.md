@@ -5,6 +5,12 @@ by release version, then by the date the logical change landed.
 
 ## Unreleased
 
+- Updated the local Grust facade dependency from `0.7.0` to `0.9.0` so TypeSec
+  can rebuild against the current `/Users/alexy/src/grust` checkout during the
+  publish-chain handoff.
+- Added audit-safe TypeDID attestations derived from verified TypeDID messages,
+  giving downstream systems a payload-free proof summary to persist after
+  TypeSec verifies the envelope.
 - Updated the `grust-graph` dependency and user-facing Grust examples from
   `0.6.2` to `0.7.0`.
 - Rebuilt the book artifacts for `typesec (0.7.0)` and delivered the versioned

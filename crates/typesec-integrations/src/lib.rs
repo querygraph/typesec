@@ -19,8 +19,9 @@ pub use did::{
     DidError, DidKeyStore, DidMessageBody, DidMessageGateway, DidMessageReference, DidOllamaClient,
     DidReplyBinding, DidResolver, DidService, Ed25519DidKey, Ed25519DidKeyStore,
     HttpTypeDidAdapter, SecureEnvelopeAdapter, StaticDidResolver, StaticTypeDidProfileResolver,
-    TypeDidConversation, TypeDidGateway, TypeDidMode, TypeDidProfile, TypeDidProfileResolver,
-    TypeDidWrapRequest, VerificationMethod, VerifiedDidPrompt, VerifiedTypeDidMessage,
+    TypeDidAttestation, TypeDidConversation, TypeDidGateway, TypeDidMode, TypeDidProfile,
+    TypeDidProfileResolver, TypeDidWrapRequest, VerificationMethod, VerifiedDidPrompt,
+    VerifiedTypeDidMessage,
 };
 #[cfg(feature = "demo-crypto")]
 pub use did::{DemoDidKeyPair, DemoDidKeyStore};

@@ -1289,6 +1289,58 @@ pub struct VerifiedTypeDidMessage {
     pub payload: SecureValue<Secret, Vec<u8>, GenericResource>,
 }
 
+/// Policy/audit-safe attestation derived from a verified TypeDID message.
+///
+/// This contains no plaintext payload and no raw signature material. It is the
+/// compact boundary object downstream systems can persist after a
+/// [`TypeDidGateway`] has verified the envelope signature, recipient, expiry,
+/// conversation metadata, and payload authentication.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TypeDidAttestation {
+    /// Verified sender DID.
+    pub subject: Did,
+    /// Stable signed envelope id.
+    pub envelope_id: String,
+    /// SHA-256 digest of the signed envelope reference.
+    pub envelope_digest: String,
+    /// Policy-visible requested action.
+    pub action: String,
+    /// Policy-visible requested resource.
+    pub resource: String,
+    /// Policy-visible privacy class.
+    pub privacy: String,
+    /// TypeDID conversation id.
+    pub conversation_id: String,
+    /// TypeDID transport/protocol family.
+    pub protocol: String,
+    /// TypeDID delivery mode.
+    pub mode: TypeDidMode,
+    /// Negotiated TypeDID crypto/profile id.
+    pub profile: String,
+    /// Conversation expiry time as unix seconds, when supplied by the sender.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<u64>,
+}
+
+impl VerifiedTypeDidMessage {
+    /// Return an audit-safe attestation for this verified message.
+    pub fn attestation(&self) -> TypeDidAttestation {
+        TypeDidAttestation {
+            subject: self.subject.clone(),
+            envelope_id: self.message_ref.id.clone(),
+            envelope_digest: self.message_ref.digest.clone(),
+            action: self.body.action.clone(),
+            resource: self.body.resource.clone(),
+            privacy: self.body.privacy.clone(),
+            conversation_id: self.conversation.conversation_id.clone(),
+            protocol: self.conversation.protocol.clone(),
+            mode: self.conversation.mode,
+            profile: self.conversation.profile.clone(),
+            expires_at: self.conversation.expires_at,
+        }
+    }
+}
+
 /// Verified and decrypted DID prompt.
 #[derive(Debug)]
 pub struct VerifiedDidPrompt {
@@ -2104,6 +2156,42 @@ mod tests {
         )
         .expect("read cap");
         assert_eq!(verified.payload.reveal(&read).expect("payload"), payload);
+    }
+
+    #[test]
+    fn typedid_verified_message_exposes_audit_safe_attestation() {
+        let (alice, agent, resolver, keys) = ed25519_fixture();
+        let envelope = DidEnvelope::typedid(
+            "typedid-attestation-1",
+            alice.clone(),
+            agent.clone(),
+            DidMessageBody::agent_message("lakecat:table:events", "internal"),
+            TypeDidConversation::new(
+                "conversation-1",
+                TypeDidMode::RequestReply,
+                TypeDidProfile::ed25519_x25519_chacha20().id,
+                "a2a",
+            )
+            .with_expires_at(unix_time() + 300),
+            b"secret payload",
+            &resolver,
+            &keys,
+        )
+        .expect("typedid envelope");
+        let gateway = TypeDidGateway::new(Arc::new(resolver), Arc::new(keys), agent);
+        let verified = gateway.open_message(&envelope).expect("verified typedid");
+        let attestation = verified.attestation();
+
+        assert_eq!(attestation.subject, alice);
+        assert_eq!(attestation.envelope_id, "typedid-attestation-1");
+        assert_eq!(attestation.action, "agent:message");
+        assert_eq!(attestation.resource, "lakecat:table:events");
+        assert_eq!(attestation.privacy, "internal");
+        assert_eq!(attestation.protocol, "a2a");
+        assert_eq!(attestation.mode, TypeDidMode::RequestReply);
+        let serialized = serde_json::to_string(&attestation).unwrap();
+        assert!(!serialized.contains("secret payload"));
+        assert!(!serialized.contains(&envelope.signature));
     }
 
     #[test]
