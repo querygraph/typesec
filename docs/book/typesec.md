@@ -205,10 +205,10 @@ policies/rbac-example.yaml
 policies/odrl-example.yaml
 docs/company-graph-grust-sail.md
 docs/david-andrzejewski-scale-by-the-bay-2018-transcript.md
-docs/improvements.md
+docs/completed/improvements.md
 docs/oauth-provider-integrations.md
 docs/typesec-and-auth-frameworks.md
-docs/typesec-claude1.md
+docs/completed/typesec-claude1.md
 tests/python/test_cli_policy.py
 ```
 
@@ -1547,8 +1547,8 @@ All passed.
 
 # What We Improved
 
-The improvement notes in `docs/improvements.md` record a useful snapshot of the
-engineering work.
+The archived improvement notes in `docs/completed/improvements.md` record a
+useful snapshot of the early engineering work.
 
 The workspace was upgraded to Rust 2024. Compiler failures were fixed across
 lattice tests, proc-macro parsing, examples, and doctests. Clippy was made to

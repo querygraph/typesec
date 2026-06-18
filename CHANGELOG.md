@@ -5,6 +5,10 @@ by release version, then by the date the logical change landed.
 
 ## Unreleased
 
+- Consolidated book metadata and cover publishing guidance into
+  `docs/book/PUBLISH.md`, then archived superseded status notes under
+  `docs/completed/`.
+
 ## 0.8.0
 
 ### 2026-06-17
