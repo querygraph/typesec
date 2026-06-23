@@ -328,6 +328,32 @@ Run the smoke tests:
 uv run python -m unittest tests/python/test_typedid_framework_adapters.py
 ```
 
+## `pydantic_ai_capabilities.py`
+
+Path:
+
+```text
+examples/pydantic_ai_capabilities.py
+```
+
+This Python example builds a real Pydantic AI v2 `Capability`, attaches a
+Typesec-protected report tool, and runs it through Pydantic AI's `TestModel` so
+the example needs no model provider credentials. The allowed TypeDID subject can
+summarize the verified payload; the denied subject is blocked before the payload
+is read.
+
+Run it:
+
+```sh
+uv run python examples/pydantic_ai_capabilities.py
+```
+
+Run the smoke tests:
+
+```sh
+uv run python -m unittest tests/python/test_pydantic_ai_capabilities.py
+```
+
 ## Company Graph Examples
 
 Directory:

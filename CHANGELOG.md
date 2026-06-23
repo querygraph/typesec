@@ -8,6 +8,9 @@ by release version, then by the date the logical change landed.
 - Added Pydantic AI v2 capability metadata for Typesec-protected tools in
   `typesec-integrations`, plus Python adapter examples and tests that map a
   TypeDID policy gate into a deferred Pydantic AI capability bundle.
+- Added a complete Python Pydantic AI v2 capability example that runs a real
+  `Agent` with `TestModel`, exercises an allowed TypeDID payload, and verifies
+  a denied subject is blocked before tool execution.
 - Updated local Grust path dependency constraints from `0.9.0` to `0.10.0`
   so Cargo-backed checks resolve against the sibling Grust checkout.
 - Consolidated book metadata and cover publishing guidance into
