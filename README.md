@@ -172,6 +172,9 @@ The optional `integrations` feature adds provider-facing adapters:
   resources such as `project/proj_123`.
 - **`ArcadeToolAuthEngine`** checks whether a user has authorized an external
   tool such as `Gmail.ListEmails`.
+- **Pydantic AI v2 capability descriptors** map Typesec-protected tools into
+  Pydantic AI `Capability` bundles with stable ids, deferred loading metadata,
+  instructions, and per-tool permission/resource requirements.
 - **DID messaging** verifies DID-wrapped encrypted prompts, converts plaintext
   into `SecureValue<Secret, _, _>`, and sends prompts to Ollama only after
   typed inference and sensitive-read capabilities exist.
@@ -324,9 +327,11 @@ For the full example catalog, install commands, and run commands, see
 [`examples/README_examples.md`](examples/README_examples.md).
 
 For Python agents, the company graph examples include a framework-neutral
-Typesec gate, a LangChain-style adapter, and a Pydantic AI adapter. The native
-Python module lives in `crates/typesec-python` and can be built with maturin as
-`typesec_native`.
+Typesec gate, a LangChain-style adapter, and a Pydantic AI v2 adapter. The
+Pydantic path exposes a dependency-injected tool wrapper plus a capability spec
+that production code can turn into `pydantic_ai.capabilities.Capability` for
+`Agent(..., capabilities=[...])`. The native Python module lives in
+`crates/typesec-python` and can be built with maturin as `typesec_native`.
 
 ---
 

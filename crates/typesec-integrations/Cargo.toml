@@ -5,7 +5,7 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "OAuth, OIDC, WorkOS, and Arcade integrations for typesec"
+description = "OAuth, OIDC, WorkOS, Arcade, Pydantic AI, and DID integrations for typesec"
 
 [features]
 default = []

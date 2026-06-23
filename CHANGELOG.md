@@ -5,6 +5,11 @@ by release version, then by the date the logical change landed.
 
 ## Unreleased
 
+- Added Pydantic AI v2 capability metadata for Typesec-protected tools in
+  `typesec-integrations`, plus Python adapter examples and tests that map a
+  TypeDID policy gate into a deferred Pydantic AI capability bundle.
+- Updated local Grust path dependency constraints from `0.9.0` to `0.10.0`
+  so Cargo-backed checks resolve against the sibling Grust checkout.
 - Consolidated book metadata and cover publishing guidance into
   `docs/book/PUBLISH.md`, then archived superseded status notes under
   `docs/completed/`.

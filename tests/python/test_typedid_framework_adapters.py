@@ -35,6 +35,19 @@ class TypeDidFrameworkAdapterTests(unittest.TestCase):
         result = self.example.run_pydantic_style_demo()
         self.assertIn("summary(", result)
 
+    def test_pydantic_capability_spec_maps_to_typesec_policy(self) -> None:
+        spec = self.example.pydantic_typesec_capability_spec()
+        self.assertEqual(spec.id, "typesec_typedid_reports")
+        self.assertTrue(spec.defer_loading)
+        self.assertIn("Typesec gate", spec.instructions)
+        self.assertEqual(spec.tools[0].required_permission, "read_sensitive")
+        self.assertEqual(spec.tools[0].resource_id, "reports/q1")
+
+    def test_pydantic_capability_catalog_entry_is_serializable(self) -> None:
+        entry = self.example.pydantic_typesec_capability_spec().as_catalog_entry()
+        self.assertEqual(entry["id"], "typesec_typedid_reports")
+        self.assertEqual(entry["tools"][0]["name"], "summarize_report")
+
     def test_denied_message_does_not_run_tool(self) -> None:
         result = self.example.run_denied_demo()
         self.assertIn("blocked as expected", result)

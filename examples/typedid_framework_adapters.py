@@ -1,4 +1,4 @@
-"""TypeDID framework adapter sketches for LangChain and Pydantic AI.
+"""TypeDID framework adapter sketches for LangChain and Pydantic AI v2.
 
 This example intentionally uses only the Python standard library. It models the
 boundary a Python framework should see *after* a local TypeDID gateway has
@@ -17,7 +17,7 @@ import json
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Generic, TypeVar
+from typing import Any, Callable, Generic, TypeVar
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -164,11 +164,11 @@ class PydanticTypeDidDeps:
 
 
 class PydanticTypeDidTool(Generic[T]):
-    """Pydantic AI-style tool wrapper.
+    """Pydantic AI-style tool wrapper for dependency-injected tools.
 
-    A real Pydantic AI tool would receive `RunContext[PydanticTypeDidDeps]` and
-    read `ctx.deps`. This wrapper models that dependency boundary without
-    requiring the optional `pydantic-ai` package during smoke tests.
+    A Pydantic AI v2 tool receives `RunContext[PydanticTypeDidDeps]` and reads
+    `ctx.deps`. This wrapper models that dependency boundary without requiring
+    the optional `pydantic-ai` package during smoke tests.
     """
 
     def __init__(self, handler: Callable[[bytes], T]):
@@ -177,6 +177,89 @@ class PydanticTypeDidTool(Generic[T]):
     def __call__(self, deps: PydanticTypeDidDeps) -> T:
         deps.gate.require(deps.message)
         return self.handler(deps.message.payload)
+
+
+@dataclass(frozen=True)
+class PydanticTypesecToolSpec:
+    """Serializable Typesec metadata for a Pydantic AI v2 tool."""
+
+    name: str
+    description: str
+    required_permission: str
+    resource_id: str
+
+
+@dataclass(frozen=True)
+class PydanticTypesecCapabilitySpec:
+    """Framework-neutral mirror of `pydantic_ai.capabilities.Capability`."""
+
+    id: str
+    description: str
+    instructions: str
+    defer_loading: bool
+    tools: tuple[PydanticTypesecToolSpec, ...]
+
+    def as_catalog_entry(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "description": self.description,
+            "instructions": self.instructions,
+            "defer_loading": self.defer_loading,
+            "tools": [tool.__dict__ for tool in self.tools],
+        }
+
+
+def pydantic_typesec_capability_spec() -> PydanticTypesecCapabilitySpec:
+    """Return the Typesec capability bundle a Pydantic AI v2 agent should load."""
+
+    return PydanticTypesecCapabilitySpec(
+        id="typesec_typedid_reports",
+        description="Use for TypeDID-verified report access governed by Typesec.",
+        instructions=(
+            "Before using protected TypeDID payloads, require the Typesec gate "
+            "for the verified subject, action, and resource in run dependencies."
+        ),
+        defer_loading=True,
+        tools=(
+            PydanticTypesecToolSpec(
+                name="summarize_report",
+                description="Summarize a TypeDID-verified sensitive report payload.",
+                required_permission="read_sensitive",
+                resource_id="reports/q1",
+            ),
+        ),
+    )
+
+
+def build_pydantic_ai_capability() -> Any:
+    """Build a real Pydantic AI v2 Capability when `pydantic-ai` is installed.
+
+    The optional import keeps repository smoke tests deterministic. Production
+    code can pass the returned capability to `Agent(..., capabilities=[...])`
+    and register tools that accept `RunContext[PydanticTypeDidDeps]`.
+    """
+
+    try:
+        from pydantic_ai.capabilities import Capability
+    except ImportError as exc:  # pragma: no cover - optional dependency path
+        raise RuntimeError("install pydantic-ai to build the runtime capability") from exc
+
+    spec = pydantic_typesec_capability_spec()
+    capability = Capability(
+        id=spec.id,
+        description=spec.description,
+        instructions=spec.instructions,
+        defer_loading=spec.defer_loading,
+    )
+
+    @capability.tool
+    async def summarize_report_tool(ctx: Any) -> str:
+        """Summarize a TypeDID-verified sensitive report payload."""
+
+        tool = PydanticTypeDidTool(summarize_report)
+        return tool(ctx.deps)
+
+    return capability
 
 
 def summarize_report(payload: bytes) -> str:
@@ -213,6 +296,12 @@ def run_pydantic_style_demo() -> str:
     return tool(deps)
 
 
+def run_pydantic_capability_spec_demo() -> str:
+    spec = pydantic_typesec_capability_spec()
+    tool = spec.tools[0]
+    return f"{spec.id}:{tool.name}:{tool.required_permission}:{tool.resource_id}"
+
+
 def run_denied_demo() -> str:
     middleware = LangChainTypeDidMiddleware(TypesecJsonGate())
     try:
@@ -225,6 +314,7 @@ def run_denied_demo() -> str:
 def main() -> None:
     print(f"LangChain-style: {run_langchain_style_demo()}")
     print(f"Pydantic-style:  {run_pydantic_style_demo()}")
+    print(f"Pydantic capability: {run_pydantic_capability_spec_demo()}")
     print(run_denied_demo())
 
 
