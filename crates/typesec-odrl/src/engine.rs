@@ -20,6 +20,13 @@ struct RuleMatch {
     evals: Vec<ConstraintEval>,
 }
 
+/// A rule that matched the target but had at least one failing constraint.
+struct ConstraintFailure {
+    policy_uid: String,
+    rule_type: OdrlRuleType,
+    evals: Vec<ConstraintEval>,
+}
+
 /// A matched prohibition: `(policy_uid, reason, constraint_evals)`.
 type ProhibitionMatch = (String, String, Vec<ConstraintEval>);
 
@@ -27,6 +34,7 @@ type ProhibitionMatch = (String, String, Vec<ConstraintEval>);
 struct ScanResult {
     permission_matches: Vec<RuleMatch>,
     prohibition_match: Option<ProhibitionMatch>,
+    constraint_failures: Vec<ConstraintFailure>,
 }
 
 /// An ODRL policy engine.
@@ -79,6 +87,23 @@ impl OdrlEngine {
         resource: &str,
         ctx: &ConstraintContext,
     ) -> PolicyResult {
+        let (verdict, events) = self.decide(subject, action, resource, ctx);
+        for event in &events {
+            event.log();
+        }
+        verdict
+    }
+
+    /// Evaluate a request and return the verdict together with the full audit
+    /// trail, *without* logging. Keeping this pure makes the audit trail
+    /// testable; [`check_with_context`][Self::check_with_context] logs the events.
+    fn decide(
+        &self,
+        subject: &str,
+        action: &str,
+        resource: &str,
+        ctx: &ConstraintContext,
+    ) -> (PolicyResult, Vec<OdrlAuditEvent>) {
         let candidates = self.candidate_rules(subject, action);
         debug!(
             subject,
@@ -89,7 +114,7 @@ impl OdrlEngine {
         );
 
         let scan = self.scan_candidates(&candidates, action, resource, ctx);
-        self.resolve_with_audit(scan, subject, action, resource)
+        build_decision(scan, subject, action, resource)
     }
 
     /// Scan candidate rules and collect matching permissions and the first
@@ -103,6 +128,7 @@ impl OdrlEngine {
     ) -> ScanResult {
         let mut permission_matches: Vec<RuleMatch> = Vec::new();
         let mut prohibition_match: Option<ProhibitionMatch> = None;
+        let mut constraint_failures: Vec<ConstraintFailure> = Vec::new();
 
         for rule_ref in candidates {
             let policy = &self.doc.policies[rule_ref.policy_index];
@@ -144,89 +170,29 @@ impl OdrlEngine {
                     });
                     // Don't break: a later prohibition might override this.
                 }
-                _ => {} // duty, or constraint failed
+                OdrlRuleType::Duty => {
+                    // Duties are obligations, not gating rules. Typesec has no
+                    // fulfillment-tracking model, so a duty is parsed and indexed
+                    // but does not affect the Allow/Deny verdict. Documented no-op.
+                }
+                // A permission or prohibition that matched the target but failed
+                // a constraint — surfaced in the audit trail (below) rather than
+                // silently dropped.
+                _ => {
+                    constraint_failures.push(ConstraintFailure {
+                        policy_uid: policy.uid.clone(),
+                        rule_type: rule.rule_type,
+                        evals: constraint_evals,
+                    });
+                }
             }
         }
 
         ScanResult {
             permission_matches,
             prohibition_match,
+            constraint_failures,
         }
-    }
-
-    /// Apply ODRL conflict resolution to a [`ScanResult`], emit the audit trail,
-    /// and return the verdict. Prohibition wins over permission.
-    fn resolve_with_audit(
-        &self,
-        scan: ScanResult,
-        subject: &str,
-        action: &str,
-        resource: &str,
-    ) -> PolicyResult {
-        let ScanResult {
-            mut permission_matches,
-            prohibition_match,
-        } = scan;
-
-        // Resolution: prohibition wins over permission.
-        if let Some((policy_uid, reason, evals)) = prohibition_match {
-            for permission_match in permission_matches {
-                let event = OdrlAuditEvent {
-                    policy_uid: permission_match.policy_uid,
-                    matched_rule: Some(OdrlRuleType::Permission),
-                    subject: subject.to_owned(),
-                    action: action.to_owned(),
-                    target: resource.to_owned(),
-                    verdict: OdrlVerdict::Overridden {
-                        by_policy: policy_uid.clone(),
-                        reason: reason.clone(),
-                    },
-                    constraint_results: permission_match.evals,
-                };
-                event.log();
-            }
-
-            let event = OdrlAuditEvent {
-                policy_uid: policy_uid.to_owned(),
-                matched_rule: Some(OdrlRuleType::Prohibition),
-                subject: subject.to_owned(),
-                action: action.to_owned(),
-                target: resource.to_owned(),
-                verdict: OdrlVerdict::Prohibited {
-                    reason: reason.clone(),
-                },
-                constraint_results: evals,
-            };
-            event.log();
-            return PolicyResult::Deny(reason);
-        }
-
-        if let Some(permission_match) = permission_matches.pop() {
-            let event = OdrlAuditEvent {
-                policy_uid: permission_match.policy_uid,
-                matched_rule: Some(OdrlRuleType::Permission),
-                subject: subject.to_owned(),
-                action: action.to_owned(),
-                target: resource.to_owned(),
-                verdict: OdrlVerdict::Permitted,
-                constraint_results: permission_match.evals,
-            };
-            event.log();
-            return PolicyResult::Allow;
-        }
-
-        // No rule matched — delegate to an outer engine (e.g., RBAC).
-        let event = OdrlAuditEvent {
-            policy_uid: "<none>".to_owned(),
-            matched_rule: None,
-            subject: subject.to_owned(),
-            action: action.to_owned(),
-            target: resource.to_owned(),
-            verdict: OdrlVerdict::NotApplicable,
-            constraint_results: vec![],
-        };
-        event.log();
-        PolicyResult::delegate("odrl", "no matching ODRL rule")
     }
 
     fn candidate_rules(&self, subject: &str, action: &str) -> Vec<RuleRef> {
@@ -249,6 +215,104 @@ impl OdrlEngine {
 
         candidates
     }
+}
+
+/// Render an ODRL verdict and the full audit trail for a [`ScanResult`].
+///
+/// Pure (no logging) so the events are testable. Prohibition wins over
+/// permission; every constraint-failed rule and every matched permission is
+/// recorded so the trail reflects the full basis for the decision.
+fn build_decision(
+    scan: ScanResult,
+    subject: &str,
+    action: &str,
+    resource: &str,
+) -> (PolicyResult, Vec<OdrlAuditEvent>) {
+    let ScanResult {
+        permission_matches,
+        prohibition_match,
+        constraint_failures,
+    } = scan;
+    let mut events = Vec::new();
+
+    let event_for = |policy_uid, matched_rule, verdict, constraint_results| OdrlAuditEvent {
+        policy_uid,
+        matched_rule,
+        subject: subject.to_owned(),
+        action: action.to_owned(),
+        target: resource.to_owned(),
+        verdict,
+        constraint_results,
+    };
+
+    // Surface every rule that matched the target but failed a constraint — the
+    // event an auditor most wants, previously dropped silently.
+    for failure in constraint_failures {
+        let failed: Vec<String> = failure
+            .evals
+            .iter()
+            .filter(|e| !e.passed)
+            .map(|e| e.operand.to_string())
+            .collect();
+        events.push(event_for(
+            failure.policy_uid,
+            Some(failure.rule_type),
+            OdrlVerdict::ConstraintFailed {
+                constraint: failed.join(", "),
+            },
+            failure.evals,
+        ));
+    }
+
+    // Resolution: prohibition wins over permission.
+    if let Some((policy_uid, reason, evals)) = prohibition_match {
+        for permission_match in permission_matches {
+            events.push(event_for(
+                permission_match.policy_uid,
+                Some(OdrlRuleType::Permission),
+                OdrlVerdict::Overridden {
+                    by_policy: policy_uid.clone(),
+                    reason: reason.clone(),
+                },
+                permission_match.evals,
+            ));
+        }
+        events.push(event_for(
+            policy_uid,
+            Some(OdrlRuleType::Prohibition),
+            OdrlVerdict::Prohibited {
+                reason: reason.clone(),
+            },
+            evals,
+        ));
+        return (PolicyResult::Deny(reason), events);
+    }
+
+    if !permission_matches.is_empty() {
+        // Record *every* matched permission, not just one, so the trail shows
+        // the full basis for the Allow.
+        for permission_match in permission_matches {
+            events.push(event_for(
+                permission_match.policy_uid,
+                Some(OdrlRuleType::Permission),
+                OdrlVerdict::Permitted,
+                permission_match.evals,
+            ));
+        }
+        return (PolicyResult::Allow, events);
+    }
+
+    // No rule matched — delegate to an outer engine (e.g., RBAC).
+    events.push(event_for(
+        "<none>".to_owned(),
+        None,
+        OdrlVerdict::NotApplicable,
+        vec![],
+    ));
+    (
+        PolicyResult::delegate("odrl", "no matching ODRL rule"),
+        events,
+    )
 }
 
 impl PolicyEngine for OdrlEngine {

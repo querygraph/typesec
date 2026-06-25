@@ -53,7 +53,7 @@ pub struct OdrlRule {
 }
 
 /// The type of an ODRL rule.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum OdrlRuleType {
     /// Grants the assignee the action on the target (if constraints hold).
@@ -119,11 +119,6 @@ impl RuleAction {
             RuleAction::Exfiltrate => "ai:exfiltrate",
             RuleAction::Use => "*",
         }
-    }
-
-    /// Returns `true` if this action matches the given permission name.
-    pub fn matches_action(&self, action: &str) -> bool {
-        self == &RuleAction::Use || self.as_permission_name() == action
     }
 }
 

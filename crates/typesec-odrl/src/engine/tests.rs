@@ -133,6 +133,53 @@ policies:
 }
 
 #[test]
+fn constraint_failure_is_recorded_in_audit_trail() {
+    let e = engine();
+    // Wrong purpose → the read permission's `purpose` constraint fails.
+    let ctx = ConstraintContext::default().with_purpose("billing");
+    let (verdict, events) = e.decide("agent:summarizer", "read", "customer-data", &ctx);
+
+    assert!(matches!(verdict, PolicyResult::Delegate(_)));
+    assert!(
+        events
+            .iter()
+            .any(|ev| matches!(ev.verdict, OdrlVerdict::ConstraintFailed { .. })),
+        "a constraint-failed rule must appear in the audit trail, not vanish"
+    );
+}
+
+#[test]
+fn all_matched_permissions_are_logged() {
+    let yaml = r#"
+policies:
+  - uid: "policy:a"
+    type: Set
+    rules:
+      - type: permission
+        assignee: "agent:x"
+        action: read
+        target: "asset:doc"
+  - uid: "policy:b"
+    type: Set
+    rules:
+      - type: permission
+        assignee: "agent:x"
+        action: read
+        target: "asset:doc"
+"#;
+    let e = OdrlEngine::from_yaml(yaml).expect("engine build ok");
+    let ctx = ConstraintContext::default();
+    let (verdict, events) = e.decide("agent:x", "read", "doc", &ctx);
+
+    assert_eq!(verdict, PolicyResult::Allow);
+    let permitted = events
+        .iter()
+        .filter(|ev| matches!(ev.verdict, OdrlVerdict::Permitted))
+        .count();
+    assert_eq!(permitted, 2, "every matching permission should be logged");
+}
+
+#[test]
 fn prohibition_does_not_stop_later_permission_scan() {
     let yaml = r#"
 policies:

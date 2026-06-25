@@ -4,13 +4,15 @@ use proc_macro2::Span;
 use quote::quote;
 use syn::{DeriveInput, LitStr};
 
-use crate::shared::check_permission;
+use crate::shared::{check_permission, pascal_to_snake};
 
 pub(crate) fn derive_typesec_role_impl(
     input: DeriveInput,
 ) -> Result<proc_macro2::TokenStream, syn::Error> {
     let struct_name = &input.ident;
-    let struct_name_str = struct_name.to_string().to_lowercase();
+    // Use the same PascalCase → snake_case rule as the `policy!` macro so a role
+    // named `AnalystReadOnly` derives the same `name()` either way.
+    let struct_name_str = pascal_to_snake(&struct_name.to_string());
 
     // Find the #[role(...)] attribute.
     let role_attr = input

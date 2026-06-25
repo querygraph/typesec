@@ -5,6 +5,16 @@ by release version, then by the date the logical change landed.
 
 ## Unreleased
 
+- Completed the `typesec-odrl` audit trail: rules that match the target but fail
+  a constraint now emit an `OdrlVerdict::ConstraintFailed` event (previously
+  dropped silently), and *all* matched permissions are logged on an Allow (not
+  just the last). `Duty` rules are now an explicit, documented no-op. The
+  decision logic moved to a pure `build_decision` that returns the verdict plus
+  the full event list, so the audit trail is unit-tested. Removed the dead
+  `RuleAction::matches_action`.
+- Made `#[derive(TypesecRole)]` derive role names with `pascal_to_snake` like the
+  `policy!` macro, so `AnalystReadOnly` yields the same `name()` either way
+  (was `to_lowercase`, giving `analystreadonly`).
 - Fixed `typesec-odrl` numeric constraint comparison: ordering operators
   (`lt`/`lteq`/`gt`/`gteq`) now compare numerically when both operands parse as
   numbers, so `count lteq 5` correctly rejects a count of 10 (previously it
