@@ -21,6 +21,10 @@ by release version, then by the date the logical change landed.
 - Began a human-reviewability refactor (see `CLAUDE.md`): moved the inline
   `typesec-core` `lattice` and `typestate` test modules into sibling
   `lattice/tests.rs` and `typestate/tests.rs` files via `#[cfg(test)] mod tests;`.
+- Split `typesec-macro` `lib.rs` (441 lines) into `lib.rs` (91, the proc-macro
+  entry points) plus `shared.rs` (permission validation + name casing),
+  `role_derive.rs`, `policy_dsl.rs`, and `tests.rs`; corrected the derive doc
+  example to show the actual lower-cased `name()` output.
 - Split `typesec-core` `policy.rs` (989 lines) into `policy.rs` (191, the engine
   traits + wiring) plus focused `policy/` submodules: `subject`, `result`,
   `error`, `audit`, `mint`, `fallback`, and `tests`. Unified the identical
