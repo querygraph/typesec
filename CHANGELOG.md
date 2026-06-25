@@ -21,6 +21,13 @@ by release version, then by the date the logical change landed.
 - Began a human-reviewability refactor (see `CLAUDE.md`): moved the inline
   `typesec-core` `lattice` and `typestate` test modules into sibling
   `lattice/tests.rs` and `typestate/tests.rs` files via `#[cfg(test)] mod tests;`.
+- Refactored `typesec-integrations` for reviewability (behavior-preserving):
+  split the 2635-line `did.rs` into a `did/` module (11 production files, each
+  ≤386 lines, plus `did/tests.rs`) and `jwt.rs` (559) into a `jwt/` module;
+  extracted a shared `ProviderHttpEngine`/`bearer_post` helper so `workos.rs` and
+  `arcade.rs` no longer duplicate the bearer-auth HTTP shell; moved all inline
+  test modules to sibling files; and gave `ReqwestHttpClient` a 30s request
+  timeout (was unbounded). Public API unchanged; 34 tests green, clippy clean.
 - Split `typesec-macro` `lib.rs` (441 lines) into `lib.rs` (91, the proc-macro
   entry points) plus `shared.rs` (permission validation + name casing),
   `role_derive.rs`, `policy_dsl.rs`, and `tests.rs`; corrected the derive doc

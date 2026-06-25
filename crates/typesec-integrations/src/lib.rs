@@ -11,6 +11,7 @@ pub mod arcade;
 pub mod did;
 pub mod http;
 pub mod jwt;
+mod provider;
 pub mod pydantic_ai;
 pub mod workos;
 

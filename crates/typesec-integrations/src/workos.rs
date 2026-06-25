@@ -10,7 +10,8 @@ use typesec_core::{
     policy::{PolicyEngine, PolicyResult},
 };
 
-use crate::http::{HttpClient, ReqwestHttpClient};
+use crate::http::HttpClient;
+use crate::provider::{ProviderHttpEngine, ProviderHttpError};
 
 /// A WorkOS resource identifier parsed from a Typesec resource id.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,19 +56,15 @@ struct WorkOsFgaResponse {
 
 /// Policy engine that delegates resource checks to WorkOS FGA.
 pub struct WorkOsFgaEngine {
-    api_key: String,
-    base_url: String,
-    http: Arc<dyn HttpClient>,
+    engine: ProviderHttpEngine,
 }
 
 impl WorkOsFgaEngine {
     /// Create an engine using `https://api.workos.com`.
     pub fn new(api_key: impl Into<String>) -> Self {
-        Self::with_http(
-            api_key,
-            "https://api.workos.com",
-            Arc::new(ReqwestHttpClient::new()),
-        )
+        Self {
+            engine: ProviderHttpEngine::new(api_key, "https://api.workos.com"),
+        }
     }
 
     /// Create an engine with custom base URL and HTTP client.
@@ -77,9 +74,7 @@ impl WorkOsFgaEngine {
         http: Arc<dyn HttpClient>,
     ) -> Self {
         Self {
-            api_key: api_key.into(),
-            base_url: base_url.into().trim_end_matches('/').to_string(),
-            http,
+            engine: ProviderHttpEngine::with_http(api_key, base_url, http),
         }
     }
 
@@ -107,24 +102,26 @@ impl PolicyEngine for WorkOsFgaEngine {
 
         let url = format!(
             "{}/authorization/organization_memberships/{}/check",
-            self.base_url, subject
+            self.engine.base_url(),
+            subject
         );
         let body = json!({
             "permission_slug": request.permission_slug,
             "resource_type_slug": request.resource_type_slug,
             "resource_external_id": request.resource_external_id,
         });
-        let headers = [("Authorization", format!("Bearer {}", self.api_key))];
 
-        match self.http.post_json(&url, &headers, &body) {
-            Ok(value) => match serde_json::from_value::<WorkOsFgaResponse>(value) {
-                Ok(response) if response.authorized => PolicyResult::Allow,
-                Ok(_) => PolicyResult::Deny(format!(
-                    "WorkOS denied '{subject}' permission '{action}' on '{resource}'"
-                )),
-                Err(err) => PolicyResult::Deny(format!("WorkOS response parse error: {err}")),
-            },
-            Err(err) => PolicyResult::Deny(format!("WorkOS FGA check failed: {err}")),
+        match self.engine.bearer_post::<WorkOsFgaResponse>(&url, &body) {
+            Ok(response) if response.authorized => PolicyResult::Allow,
+            Ok(_) => PolicyResult::Deny(format!(
+                "WorkOS denied '{subject}' permission '{action}' on '{resource}'"
+            )),
+            Err(ProviderHttpError::Parse(err)) => {
+                PolicyResult::Deny(format!("WorkOS response parse error: {err}"))
+            }
+            Err(ProviderHttpError::Transport(err)) => {
+                PolicyResult::Deny(format!("WorkOS FGA check failed: {err}"))
+            }
         }
     }
 }
@@ -138,54 +135,4 @@ fn permission_slug(action: &str, resource_type: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::http::StaticHttpClient;
-    use serde_json::json;
-
-    fn check(
-        engine: &WorkOsFgaEngine,
-        subject: &str,
-        action: &str,
-        resource: &str,
-    ) -> PolicyResult {
-        engine.check(
-            &SubjectId::from(subject),
-            action,
-            &ResourceId::from(resource),
-        )
-    }
-
-    #[test]
-    fn parses_resource_ids_for_workos() {
-        let parsed = WorkOsResource::parse("project/proj_123").expect("parse");
-        assert_eq!(parsed.resource_type_slug, "project");
-        assert_eq!(parsed.resource_external_id, "proj_123");
-    }
-
-    #[test]
-    fn allows_when_workos_authorizes() {
-        let url = "https://api.workos.test/authorization/organization_memberships/om_1/check";
-        let http = StaticHttpClient::new().with_response(url, json!({ "authorized": true }));
-        let engine =
-            WorkOsFgaEngine::with_http("sk_test", "https://api.workos.test", Arc::new(http));
-
-        assert_eq!(
-            check(&engine, "om_1", "edit", "project/proj_123"),
-            PolicyResult::Allow
-        );
-    }
-
-    #[test]
-    fn denies_when_workos_denies() {
-        let url = "https://api.workos.test/authorization/organization_memberships/om_1/check";
-        let http = StaticHttpClient::new().with_response(url, json!({ "authorized": false }));
-        let engine =
-            WorkOsFgaEngine::with_http("sk_test", "https://api.workos.test", Arc::new(http));
-
-        assert!(matches!(
-            check(&engine, "om_1", "edit", "project/proj_123"),
-            PolicyResult::Deny(_)
-        ));
-    }
-}
+mod tests;

@@ -11,7 +11,8 @@ use typesec_core::{
     policy::{PolicyEngine, PolicyResult},
 };
 
-use crate::http::{HttpClient, ReqwestHttpClient};
+use crate::http::HttpClient;
+use crate::provider::{ProviderHttpEngine, ProviderHttpError};
 
 /// Request body used to ask Arcade whether a tool is authorized for a user.
 #[derive(Debug, Clone, Serialize)]
@@ -35,20 +36,17 @@ struct ArcadeToolAuthResponse {
 /// either be present in the explicit mapping or already look like an Arcade tool
 /// name such as `Gmail.ListEmails`.
 pub struct ArcadeToolAuthEngine {
-    api_key: String,
-    base_url: String,
+    engine: ProviderHttpEngine,
     tool_map: HashMap<String, String>,
-    http: Arc<dyn HttpClient>,
 }
 
 impl ArcadeToolAuthEngine {
     /// Create an engine using `https://api.arcade.dev`.
     pub fn new(api_key: impl Into<String>) -> Self {
-        Self::with_http(
-            api_key,
-            "https://api.arcade.dev",
-            Arc::new(ReqwestHttpClient::new()),
-        )
+        Self {
+            engine: ProviderHttpEngine::new(api_key, "https://api.arcade.dev"),
+            tool_map: HashMap::new(),
+        }
     }
 
     /// Create an engine with custom base URL and HTTP client.
@@ -58,10 +56,8 @@ impl ArcadeToolAuthEngine {
         http: Arc<dyn HttpClient>,
     ) -> Self {
         Self {
-            api_key: api_key.into(),
-            base_url: base_url.into().trim_end_matches('/').to_string(),
+            engine: ProviderHttpEngine::with_http(api_key, base_url, http),
             tool_map: HashMap::new(),
-            http,
         }
     }
 
@@ -103,79 +99,36 @@ impl PolicyEngine for ArcadeToolAuthEngine {
             );
         };
 
-        let url = format!("{}/v1/tools/authorize", self.base_url);
+        let url = format!("{}/v1/tools/authorize", self.engine.base_url());
         let body = json!({
             "tool_name": tool_name,
             "user_id": subject,
         });
-        let headers = [("Authorization", format!("Bearer {}", self.api_key))];
 
-        match self.http.post_json(&url, &headers, &body) {
-            Ok(value) => match serde_json::from_value::<ArcadeToolAuthResponse>(value) {
-                Ok(response) if response.status == "completed" => PolicyResult::Allow,
-                Ok(response) => {
-                    let url = response
-                        .url
-                        .map(|url| format!("; authorize at {url}"))
-                        .unwrap_or_default();
-                    PolicyResult::Deny(format!(
-                        "Arcade authorization for tool '{tool_name}' is '{}'{}",
-                        response.status, url
-                    ))
-                }
-                Err(err) => PolicyResult::Deny(format!("Arcade response parse error: {err}")),
-            },
-            Err(err) => PolicyResult::Deny(format!("Arcade authorization check failed: {err}")),
+        match self
+            .engine
+            .bearer_post::<ArcadeToolAuthResponse>(&url, &body)
+        {
+            Ok(response) if response.status == "completed" => PolicyResult::Allow,
+            Ok(response) => {
+                let url = response
+                    .url
+                    .map(|url| format!("; authorize at {url}"))
+                    .unwrap_or_default();
+                PolicyResult::Deny(format!(
+                    "Arcade authorization for tool '{tool_name}' is '{}'{}",
+                    response.status, url
+                ))
+            }
+            Err(ProviderHttpError::Parse(err)) => {
+                PolicyResult::Deny(format!("Arcade response parse error: {err}"))
+            }
+            Err(ProviderHttpError::Transport(err)) => {
+                PolicyResult::Deny(format!("Arcade authorization check failed: {err}"))
+            }
         }
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::http::StaticHttpClient;
-    use serde_json::json;
-
-    fn check(
-        engine: &ArcadeToolAuthEngine,
-        subject: &str,
-        action: &str,
-        resource: &str,
-    ) -> PolicyResult {
-        engine.check(
-            &SubjectId::from(subject),
-            action,
-            &ResourceId::from(resource),
-        )
-    }
-
-    #[test]
-    fn allows_completed_authorization() {
-        let http = StaticHttpClient::new().with_response(
-            "https://api.arcade.test/v1/tools/authorize",
-            json!({ "status": "completed" }),
-        );
-        let engine =
-            ArcadeToolAuthEngine::with_http("arc_test", "https://api.arcade.test", Arc::new(http))
-                .with_tool_mapping("gmail/list", "Gmail.ListEmails");
-
-        assert_eq!(
-            check(&engine, "user@example.com", "execute", "gmail/list"),
-            PolicyResult::Allow
-        );
-    }
-
-    #[test]
-    fn denies_pending_authorization_with_url() {
-        let http = StaticHttpClient::new().with_response(
-            "https://api.arcade.test/v1/tools/authorize",
-            json!({ "status": "pending", "url": "https://authorize.example" }),
-        );
-        let engine =
-            ArcadeToolAuthEngine::with_http("arc_test", "https://api.arcade.test", Arc::new(http))
-                .with_tool_mapping("gmail/list", "Gmail.ListEmails");
-
-        let result = check(&engine, "user@example.com", "execute", "gmail/list");
-        assert!(matches!(result, PolicyResult::Deny(reason) if reason.contains("authorize")));
-    }
-}
+mod tests;

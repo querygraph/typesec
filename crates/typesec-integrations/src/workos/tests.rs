@@ -1,0 +1,43 @@
+
+use super::*;
+use crate::http::StaticHttpClient;
+use serde_json::json;
+
+fn check(engine: &WorkOsFgaEngine, subject: &str, action: &str, resource: &str) -> PolicyResult {
+    engine.check(
+        &SubjectId::from(subject),
+        action,
+        &ResourceId::from(resource),
+    )
+}
+
+#[test]
+fn parses_resource_ids_for_workos() {
+    let parsed = WorkOsResource::parse("project/proj_123").expect("parse");
+    assert_eq!(parsed.resource_type_slug, "project");
+    assert_eq!(parsed.resource_external_id, "proj_123");
+}
+
+#[test]
+fn allows_when_workos_authorizes() {
+    let url = "https://api.workos.test/authorization/organization_memberships/om_1/check";
+    let http = StaticHttpClient::new().with_response(url, json!({ "authorized": true }));
+    let engine = WorkOsFgaEngine::with_http("sk_test", "https://api.workos.test", Arc::new(http));
+
+    assert_eq!(
+        check(&engine, "om_1", "edit", "project/proj_123"),
+        PolicyResult::Allow
+    );
+}
+
+#[test]
+fn denies_when_workos_denies() {
+    let url = "https://api.workos.test/authorization/organization_memberships/om_1/check";
+    let http = StaticHttpClient::new().with_response(url, json!({ "authorized": false }));
+    let engine = WorkOsFgaEngine::with_http("sk_test", "https://api.workos.test", Arc::new(http));
+
+    assert!(matches!(
+        check(&engine, "om_1", "edit", "project/proj_123"),
+        PolicyResult::Deny(_)
+    ));
+}

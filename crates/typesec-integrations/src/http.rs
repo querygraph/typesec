@@ -29,11 +29,15 @@ pub struct ReqwestHttpClient {
 }
 
 impl ReqwestHttpClient {
-    /// Create a client with reqwest defaults.
+    /// Create a client with a 30-second request timeout.
+    ///
+    /// Falls back to reqwest defaults if the timeout-configured builder fails.
     pub fn new() -> Self {
-        Self {
-            client: reqwest::blocking::Client::new(),
-        }
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .unwrap_or_else(|_| reqwest::blocking::Client::new());
+        Self { client }
     }
 }
 
