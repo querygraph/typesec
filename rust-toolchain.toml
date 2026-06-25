@@ -1,0 +1,7 @@
+# Pinned so trybuild UI-test stderr snapshots (crates/typesec-core/tests/ui/)
+# are reproducible. Diagnostic wording varies across rustc releases; without a
+# pin the committed *.stderr files drift and the compile_fail test fails on
+# fresh checkouts. Bump deliberately, refreshing snapshots with TRYBUILD=overwrite.
+[toolchain]
+channel = "1.96.0"
+components = ["rustfmt", "clippy"]

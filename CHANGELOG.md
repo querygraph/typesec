@@ -5,6 +5,12 @@ by release version, then by the date the logical change landed.
 
 ## Unreleased
 
+- Pinned the toolchain to rust 1.96.0 via `rust-toolchain.toml` and refreshed the
+  drifted `typesec-core` trybuild UI snapshot, so `cargo test` is green on a fresh
+  checkout instead of failing on compiler-version-specific diagnostic wording.
+- Began a human-reviewability refactor (see `CLAUDE.md`): moved the inline
+  `typesec-core` `lattice` and `typestate` test modules into sibling
+  `lattice/tests.rs` and `typestate/tests.rs` files via `#[cfg(test)] mod tests;`.
 - Added `CLAUDE.md` capturing the workspace architecture, a human-reviewability
   standard (file-size budget, tests in their own files, DRY), a full review of
   every crate and the book, and a phased refactor plan toward that standard.

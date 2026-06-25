@@ -9,9 +9,13 @@ help: the trait `typestate::private::Sealed` is not implemented for `SuperAuthor
   |
 3 | struct SuperAuthorized;
   | ^^^^^^^^^^^^^^^^^^^^^^
-  = help: the following other types implement trait `typestate::private::Sealed`:
-            Authenticated
-            Unauthenticated
+help: the following other types implement trait `typestate::private::Sealed`
+ --> src/typestate.rs
+  |
+  | impl private::Sealed for Unauthenticated {}
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `Unauthenticated`
+  | impl private::Sealed for Authenticated {}
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `Authenticated`
 note: required by a bound in `AgentState`
  --> src/typestate.rs
   |
