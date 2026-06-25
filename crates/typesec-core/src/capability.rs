@@ -7,9 +7,11 @@
 //! ## Why is it unforgeable?
 //!
 //! 1. The struct fields are private — you can't write `Capability { ... }` directly.
-//! 2. The only public constructor is [`Capability::new_unchecked`], which is marked
-//!    `pub(crate)`. Code outside `typesec-core` cannot call it.
-//! 3. The sealing on [`Permission`][crate::Permission] means you can't create a
+//! 2. There is no public constructor. Capabilities are minted only by the
+//!    `pub(crate)` `new_minted` path, which the [`mint_capability`][crate::mint_capability]
+//!    functions call after a successful policy check. Code outside `typesec-core`
+//!    cannot construct one.
+//! 3. The sealing on [`Permission`] means you can't create a
 //!    new permission type that bypasses the engine.
 //!
 //! Together, these invariants mean: *if you have a `Capability<P, R>` in scope,
@@ -30,15 +32,16 @@
 //! write_report(read_cap, report); // ← compile error: wrong capability type
 //! ```
 
-use std::collections::HashSet;
 use std::fmt;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{PoisonError, RwLock};
 use std::time::{Duration, SystemTime};
 
 use crate::{Permission, Resource, ResourceId, SubjectId};
+
+mod revocation;
+pub use revocation::{CapabilityRevocationList, CapabilityUseError, RevocationEpoch};
 
 /// Default lease duration for minted capabilities.
 ///
@@ -72,100 +75,10 @@ impl fmt::Display for CapabilityId {
     }
 }
 
-/// A shared revocation epoch for live capability invalidation.
-///
-/// TTLs bound how long a stale policy decision can be used, but they cannot
-/// kill an already-minted capability when policy changes mid-lease. A
-/// `RevocationEpoch` closes that gap: capabilities minted with one (via
-/// [`MintOptions::revocation`][crate::policy::MintOptions]) record the epoch
-/// counter at mint time, and [`Capability::ensure_active`] fails with
-/// [`CapabilityUseError::Revoked`] once [`revoke_all`][Self::revoke_all] has
-/// bumped the counter past it.
-///
-/// Cloning is cheap (an `Arc` clone) and all clones share the same counter.
-#[derive(Clone, Debug, Default)]
-pub struct RevocationEpoch(Arc<AtomicU64>);
-
-impl RevocationEpoch {
-    /// Create a new epoch counter starting at 0.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Revoke every capability minted against this epoch before this call.
-    ///
-    /// Capabilities minted *after* this call remain valid (until the next bump
-    /// or their TTL, whichever comes first).
-    pub fn revoke_all(&self) {
-        self.0.fetch_add(1, Ordering::AcqRel);
-    }
-
-    /// The current epoch value.
-    pub fn current(&self) -> u64 {
-        self.0.load(Ordering::Acquire)
-    }
-}
-
-/// Per-capability revocation list.
-///
-/// Pair this with [`MintOptions::with_revocation_list`][crate::policy::MintOptions::with_revocation_list]
-/// when incident response needs to revoke one minted proof without bumping a
-/// shared [`RevocationEpoch`] for every holder.
-#[derive(Debug, Default)]
-pub struct CapabilityRevocationList {
-    revoked: RwLock<HashSet<CapabilityId>>,
-}
-
-impl CapabilityRevocationList {
-    /// Create an empty capability revocation list.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Revoke one minted capability id.
-    pub fn revoke(&self, id: CapabilityId) {
-        let mut revoked = self.revoked.write().unwrap_or_else(PoisonError::into_inner);
-        revoked.insert(id);
-    }
-
-    /// Whether this list contains the capability id.
-    pub fn is_revoked(&self, id: CapabilityId) -> bool {
-        let revoked = self.revoked.read().unwrap_or_else(PoisonError::into_inner);
-        revoked.contains(&id)
-    }
-}
-
-/// Error returned when a capability is no longer valid for use.
-#[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
-pub enum CapabilityUseError {
-    /// The capability lease has expired.
-    #[error("capability expired (issued_at={issued_at:?}, expires_at={expires_at:?})")]
-    Expired {
-        /// When the capability was minted.
-        issued_at: SystemTime,
-        /// When the capability lease ended.
-        expires_at: SystemTime,
-    },
-    /// The capability was revoked via its [`RevocationEpoch`].
-    #[error("capability revoked (minted at epoch {minted_epoch}, current epoch {current_epoch})")]
-    Revoked {
-        /// Epoch counter value when the capability was minted.
-        minted_epoch: u64,
-        /// Epoch counter value now.
-        current_epoch: u64,
-    },
-    /// The capability id was revoked via a [`CapabilityRevocationList`].
-    #[error("capability revoked by id ({id})")]
-    RevokedById {
-        /// The revoked capability id.
-        id: CapabilityId,
-    },
-}
-
 /// An unforgeable proof that subject `subject` holds permission `P` on resource `R`.
 ///
-/// Construct via [`PolicyEngine::mint_capability`][crate::PolicyEngine].
+/// Construct via the [`mint_capability`][crate::mint_capability] family, which
+/// runs a [`PolicyEngine`][crate::PolicyEngine] check first.
 /// The phantom parameters `P` and `R` are erased at runtime but enforced at compile time.
 pub struct Capability<P: Permission, R: Resource> {
     /// Unique id for this minted proof.
@@ -390,142 +303,4 @@ impl<P: Permission, R: Resource> std::fmt::Display for Capability<P, R> {
 // is Send+Sync (function pointers are always Send+Sync). No unsafe needed.
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::permissions::{CanRead, CanWrite};
-    use std::time::Duration;
-
-    // A minimal test resource.
-    #[derive(Debug)]
-    struct TestResource;
-    impl Resource for TestResource {
-        fn resource_id(&self) -> &str {
-            "test://resource"
-        }
-        fn resource_type() -> &'static str {
-            "TestResource"
-        }
-    }
-
-    #[test]
-    fn capability_fields_are_correct() {
-        let cap: Capability<CanRead, TestResource> =
-            Capability::new_unchecked("agent:test", "test://resource");
-        assert_eq!(cap.subject(), "agent:test");
-        assert_eq!(cap.resource_id(), "test://resource");
-        assert_eq!(
-            Capability::<CanRead, TestResource>::permission_name(),
-            "read"
-        );
-    }
-
-    #[test]
-    fn read_and_write_caps_are_different_types() {
-        // This test is really a compile-time check, but we can demonstrate
-        // the Debug output differs.
-        let read: Capability<CanRead, TestResource> =
-            Capability::new_unchecked("agent:test", "test://resource");
-        let write: Capability<CanWrite, TestResource> =
-            Capability::new_unchecked("agent:test", "test://resource");
-        assert!(format!("{read:?}").contains("read"));
-        assert!(format!("{write:?}").contains("write"));
-    }
-
-    #[test]
-    fn capability_expires_after_default_ttl() {
-        let issued_at = SystemTime::now()
-            .checked_sub(DEFAULT_CAPABILITY_TTL + Duration::from_secs(1))
-            .expect("time subtraction");
-        let cap: Capability<CanRead, TestResource> =
-            Capability::new_with_issued_at("agent:test", "test://resource", issued_at);
-
-        assert!(cap.is_expired());
-        assert!(matches!(
-            cap.ensure_active(),
-            Err(CapabilityUseError::Expired { .. })
-        ));
-    }
-
-    #[test]
-    fn revocation_epoch_invalidates_minted_capability() {
-        let epoch = RevocationEpoch::new();
-        let cap: Capability<CanRead, TestResource> = Capability::new_minted(
-            "agent:test",
-            "test://resource",
-            SystemTime::now(),
-            DEFAULT_CAPABILITY_TTL,
-            Some(epoch.clone()),
-            None,
-        );
-
-        cap.ensure_active().expect("active before revocation");
-        epoch.revoke_all();
-        assert!(cap.is_revoked());
-        assert!(matches!(
-            cap.ensure_active(),
-            Err(CapabilityUseError::Revoked { .. })
-        ));
-    }
-
-    #[test]
-    fn capability_without_revocation_binding_is_never_revoked() {
-        let cap: Capability<CanRead, TestResource> =
-            Capability::new_unchecked("agent:test", "test://resource");
-        assert!(!cap.is_revoked());
-    }
-
-    #[test]
-    fn custom_ttl_bounds_the_lease() {
-        let cap: Capability<CanRead, TestResource> = Capability::new_minted(
-            "agent:test",
-            "test://resource",
-            SystemTime::now() - Duration::from_secs(2),
-            Duration::from_secs(1),
-            None,
-            None,
-        );
-        assert!(cap.is_expired());
-    }
-
-    #[test]
-    fn revocation_list_invalidates_one_capability() {
-        let list = Arc::new(CapabilityRevocationList::new());
-        let first: Capability<CanRead, TestResource> = Capability::new_minted(
-            "agent:test",
-            "test://resource",
-            SystemTime::now(),
-            DEFAULT_CAPABILITY_TTL,
-            None,
-            Some(list.clone()),
-        );
-        let second: Capability<CanRead, TestResource> = Capability::new_minted(
-            "agent:test",
-            "test://resource",
-            SystemTime::now(),
-            DEFAULT_CAPABILITY_TTL,
-            None,
-            Some(list.clone()),
-        );
-
-        list.revoke(first.id());
-
-        assert!(first.is_revoked());
-        assert!(!second.is_revoked());
-        assert!(matches!(
-            first.ensure_active(),
-            Err(CapabilityUseError::RevokedById { id }) if id == first.id()
-        ));
-        second
-            .ensure_active()
-            .expect("second capability remains active");
-    }
-
-    #[test]
-    fn new_capability_is_active() {
-        let cap: Capability<CanRead, TestResource> =
-            Capability::new_unchecked("agent:test", "test://resource");
-
-        assert!(!cap.is_expired());
-        cap.ensure_active().expect("new capability is active");
-    }
-}
+mod tests;

@@ -1,4 +1,3 @@
-
 use super::*;
 use crate::{
     permissions::{CanRead, CanReadInternal, CanReadSensitive, CanWrite, CanWriteSensitive},

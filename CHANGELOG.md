@@ -11,6 +11,11 @@ by release version, then by the date the logical change landed.
 - Began a human-reviewability refactor (see `CLAUDE.md`): moved the inline
   `typesec-core` `lattice` and `typestate` test modules into sibling
   `lattice/tests.rs` and `typestate/tests.rs` files via `#[cfg(test)] mod tests;`.
+- Split `typesec-core` `capability.rs` (531 lines) into `capability.rs` (306) plus
+  `capability/revocation.rs` (the `RevocationEpoch`/`CapabilityRevocationList`/
+  `CapabilityUseError` primitives) and `capability/tests.rs`; fixed a broken
+  `mint_capability` intra-doc link and the stale "only constructor is
+  `new_unchecked`" prose.
 - Added `CLAUDE.md` capturing the workspace architecture, a human-reviewability
   standard (file-size budget, tests in their own files, DRY), a full review of
   every crate and the book, and a phased refactor plan toward that standard.
