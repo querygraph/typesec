@@ -70,7 +70,8 @@ pub use policy::{
 pub use resource::{Resource, ResourceId};
 pub use role::Role;
 pub use secure_value::{
-    Internal, Join, PrivacyLevel, Public, Secret, SecureAccessError, SecureValue, Sensitive,
+    Internal, Join, PrivacyLevel, Public, Secret, SecureAccessError, SecureValue, SecureValueError,
+    Sensitive,
 };
 pub use typestate::{
     Agent, AgentState, Authenticated, Authenticator, Credentials, Token, Unauthenticated,
