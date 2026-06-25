@@ -14,7 +14,7 @@ by release version, then by the date the logical change landed.
   (not future work); `typesec check --json` is shipped and emits `decision`/
   `allowed` (not `verdict`); example invocations use `-p typesec-cli`; the
   dependency list reflects `serde_norway`, `garde`, `zeroize`, and the DID crypto
-  crates.
+  crates. Refreshed the stale Workspace Tour example/doc/test file list.
 - Pinned the toolchain to rust 1.96.0 via `rust-toolchain.toml` and refreshed the
   drifted `typesec-core` trybuild UI snapshot, so `cargo test` is green on a fresh
   checkout instead of failing on compiler-version-specific diagnostic wording.

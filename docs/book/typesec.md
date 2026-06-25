@@ -198,18 +198,25 @@ The repository also includes:
 examples/rbac_agent.rs
 examples/odrl_agent.rs
 examples/provider_integrations.rs
+examples/did_messaging.rs
+examples/typedid_agent_communications.rs
+examples/pydantic_ai_capabilities.py
+examples/typedid_framework_adapters.py
 examples/company_graph/company_graph_grust_sail.rs
+examples/company_graph/graph_policy_schema.rs
 examples/company_graph/langchain_company_graph.py
-docs/did-messaging.md
+examples/company_graph/pydantic_company_graph.py
 policies/rbac-example.yaml
 policies/odrl-example.yaml
+docs/did-messaging.md
+docs/typedid-agent-communications.md
+docs/typedid-ecosystem.md
 docs/company-graph-grust-sail.md
-docs/david-andrzejewski-scale-by-the-bay-2018-transcript.md
-docs/completed/improvements.md
 docs/oauth-provider-integrations.md
 docs/typesec-and-auth-frameworks.md
-docs/completed/typesec-claude1.md
 tests/python/test_cli_policy.py
+tests/python/test_pydantic_ai_capabilities.py
+tests/python/test_typedid_framework_adapters.py
 ```
 
 The root workspace uses Rust 2024. Common dependencies are declared in
