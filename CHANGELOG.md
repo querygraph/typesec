@@ -5,6 +5,14 @@ by release version, then by the date the logical change landed.
 
 ## Unreleased
 
+- Split the remaining oversized test files and the Python impl, so every `.rs`
+  file in the workspace is now reviewable in one sitting: `did/tests.rs` (713)
+  into a themed `did/tests/` directory (common + demo + ed25519 + ollama +
+  typedid); `typesec-agent/tests/integration.rs` (624) into `tests/common/` plus
+  themed `rbac_lattice`/`odrl_constraints`/`combinators`/`typestate_audit` files
+  (with the inconsistent numeric test-name prefixes dropped); and
+  `typesec-python/src/lib.rs` (403 → 237) into `format`/`engine`/`decision`
+  modules (tests stay inline — the crate is `cdylib`).
 - Hardened `typesec-integrations` DID envelopes: the signed `signing_input` now
   covers `kid` and `nonce` (so neither can be swapped without breaking the
   Ed25519 signature); `DidMessageGateway` rejects replays of already-opened

@@ -297,8 +297,11 @@ Follow-ups (completed 2026-06-25):
   return it from `execute`'s closure); the rbac Cypher DDL helpers are used by
   `examples/company_graph/graph_policy_schema.rs`; `TypeDidProfile` metadata
   fields are protocol descriptors — all kept.
-- [~] Split the two large *test* files (`did/tests.rs`, `agent/tests/integration.rs`)
-  and the `typesec-python` impl — in progress.
+- [x] Split the two large *test* files (`did/tests.rs` 713 → 6 themed files;
+  `agent/tests/integration.rs` 624 → `tests/common/` + 4 themed files, broken
+  numbering fixed) and the `typesec-python` impl (`lib.rs` 403 → 237 +
+  `format`/`engine`/`decision`). **Every `.rs` file in the workspace is now
+  ≤ ~390 lines.**
 
 Still open (deliberately not auto-applied):
 - AEAD associated-data binding for DID envelopes (defense-in-depth; needs a

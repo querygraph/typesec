@@ -2,68 +2,14 @@
 
 use pyo3::exceptions::{PyPermissionError, PyValueError};
 use pyo3::prelude::*;
-use typesec_core::{
-    ResourceId, SubjectId,
-    policy::{PolicyEngine, PolicyResult, RequestContext},
-};
 
-#[derive(Clone, Copy)]
-enum PolicyFormat {
-    Rbac,
-    Odrl,
-    Graph,
-}
+mod decision;
+mod engine;
+mod format;
 
-impl PolicyFormat {
-    fn detect(explicit: Option<&str>, yaml: &str) -> PyResult<Self> {
-        match explicit {
-            Some("rbac") => Ok(Self::Rbac),
-            Some("odrl") => Ok(Self::Odrl),
-            Some("graph") => Ok(Self::Graph),
-            Some(other) => Err(PyValueError::new_err(format!(
-                "unsupported policy format '{other}'; use rbac, odrl, or graph"
-            ))),
-            None if yaml.contains("graph_policy:") => Ok(Self::Graph),
-            None if yaml.contains("roles:") => Ok(Self::Rbac),
-            None if yaml.contains("policies:") => Ok(Self::Odrl),
-            None => Err(PyValueError::new_err(
-                "could not detect policy format; pass format='rbac', 'odrl', or 'graph'",
-            )),
-        }
-    }
-}
-
-#[pyclass(frozen)]
-#[derive(Clone, Debug)]
-struct Decision {
-    #[pyo3(get)]
-    allowed: bool,
-    #[pyo3(get)]
-    subject: String,
-    #[pyo3(get)]
-    action: String,
-    #[pyo3(get)]
-    resource: String,
-    #[pyo3(get)]
-    reason: Option<String>,
-}
-
-#[pymethods]
-impl Decision {
-    fn __repr__(&self) -> String {
-        let verdict = if self.allowed { "ALLOW" } else { "DENY" };
-        match &self.reason {
-            Some(reason) => format!(
-                "Decision({verdict}, subject={:?}, action={:?}, resource={:?}, reason={:?})",
-                self.subject, self.action, self.resource, reason
-            ),
-            None => format!(
-                "Decision({verdict}, subject={:?}, action={:?}, resource={:?})",
-                self.subject, self.action, self.resource
-            ),
-        }
-    }
-}
+use decision::{Decision, check_policy, decision_from_result};
+use engine::{CompiledPolicyEngine, compile_policy};
+use format::PolicyFormat;
 
 #[pyclass]
 struct TypesecGate {
@@ -149,118 +95,6 @@ fn check(
 fn validate(policy_yaml: &str, format: Option<&str>) -> PyResult<()> {
     let format = PolicyFormat::detect(format, policy_yaml)?;
     compile_policy(policy_yaml, format).map(|_| ())
-}
-
-fn compile_policy(yaml: &str, format: PolicyFormat) -> PyResult<CompiledPolicyEngine> {
-    match format {
-        PolicyFormat::Rbac => {
-            let engine = typesec_rbac::RbacEngine::from_yaml(yaml)
-                .map_err(|err| PyValueError::new_err(format!("RBAC YAML parse error: {err}")))?;
-            Ok(CompiledPolicyEngine::Rbac(engine))
-        }
-        PolicyFormat::Odrl => {
-            let engine = typesec_odrl::OdrlEngine::from_yaml(yaml)
-                .map_err(|err| PyValueError::new_err(format!("ODRL YAML parse error: {err}")))?;
-            Ok(CompiledPolicyEngine::Odrl(engine))
-        }
-        PolicyFormat::Graph => {
-            let engine = typesec_rbac::GraphPolicyEngine::from_yaml(yaml).map_err(|err| {
-                PyValueError::new_err(format!("graph policy YAML parse error: {err}"))
-            })?;
-            Ok(CompiledPolicyEngine::Graph(engine))
-        }
-    }
-}
-
-enum CompiledPolicyEngine {
-    Rbac(typesec_rbac::RbacEngine),
-    Odrl(typesec_odrl::OdrlEngine),
-    Graph(typesec_rbac::GraphPolicyEngine),
-}
-
-impl CompiledPolicyEngine {
-    fn check(
-        &self,
-        subject: &str,
-        action: &str,
-        resource: &str,
-        purpose: Option<&str>,
-    ) -> PolicyResult {
-        let subject = SubjectId::from(subject);
-        let resource = ResourceId::from(resource);
-        match self {
-            Self::Rbac(engine) => engine.check(&subject, action, &resource),
-            Self::Odrl(engine) => {
-                let ctx = request_context(purpose);
-                PolicyEngine::check_with_context(engine, &subject, action, &resource, &ctx)
-            }
-            Self::Graph(engine) => engine.check(&subject, action, &resource),
-        }
-    }
-}
-
-fn request_context(purpose: Option<&str>) -> RequestContext {
-    purpose.map_or_else(RequestContext::default, |purpose| {
-        RequestContext::default().with_purpose(purpose.to_string())
-    })
-}
-
-fn check_policy(
-    yaml: &str,
-    format: PolicyFormat,
-    subject: &str,
-    action: &str,
-    resource: &str,
-    purpose: Option<&str>,
-) -> PyResult<Decision> {
-    let engine = compile_policy(yaml, format)?;
-    Ok(decision_from_result(
-        subject,
-        action,
-        resource,
-        engine.check(subject, action, resource, purpose),
-    ))
-}
-
-fn decision_from_result(
-    subject: &str,
-    action: &str,
-    resource: &str,
-    result: PolicyResult,
-) -> Decision {
-    match result {
-        PolicyResult::Allow => Decision {
-            allowed: true,
-            subject: subject.to_string(),
-            action: action.to_string(),
-            resource: resource.to_string(),
-            reason: None,
-        },
-        PolicyResult::Deny(reason) => Decision {
-            allowed: false,
-            subject: subject.to_string(),
-            action: action.to_string(),
-            resource: resource.to_string(),
-            reason: Some(reason),
-        },
-        PolicyResult::Delegate(reason) => Decision {
-            allowed: false,
-            subject: subject.to_string(),
-            action: action.to_string(),
-            resource: resource.to_string(),
-            reason: Some(format!(
-                "policy delegated to {}: {}",
-                reason.engine, reason.reason
-            )),
-        },
-        _ => Decision {
-            allowed: false,
-            subject: subject.to_string(),
-            action: action.to_string(),
-            resource: resource.to_string(),
-            reason: Some("unknown policy result".to_string()),
-        },
-    }
 }
 
 #[pymodule]
