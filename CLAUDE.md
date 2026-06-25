@@ -282,22 +282,25 @@ Done — `cargo test --workspace` fully green; every production *logic* file is 
 - [x] **Phase E (book):** factual fixes (Grust path-dep, `Capability` types,
   `--json`, six integration modules, `typesec-python`, deps list, file list).
 
-Remaining (optional follow-ups, each isolated and low-risk):
-- [ ] Split the two large *test* files for symmetry: `did/tests.rs` (713) into
-  `did/tests/{demo,ed25519,typedid,ollama}.rs`; `typesec-agent/tests/integration.rs`
-  (624) into themed files (and fix its broken 01–13 numbering).
-- [ ] Split `typesec-python/src/lib.rs` impl into `format`/`engine`/`decision`
-  modules (the inline tests must stay — `cdylib` can't be linked by an external
-  test harness).
-- [ ] **odrl audit completeness:** emit `OdrlVerdict::ConstraintFailed` events and
-  log *all* matched permissions (not just the last). The `scan_candidates` /
-  `resolve_with_audit` split now isolates this. Decide `Duty` semantics (silent
-  no-op today).
-- [ ] **macro name consistency:** `#[derive(TypesecRole)]` uses `to_lowercase()`
-  while `policy!` uses `pascal_to_snake` — pick one (behavior change; check
-  examples).
-- [ ] **DID security hardening (design needed):** bind envelope metadata as AEAD
-  associated data + assert `signing_input` covers `kid`; add replay protection
-  (validate `created_time`, nonce cache); enforce `max_payload_bytes`.
-- [ ] Dead code: `RuleAction::matches_action`, `TaskError::ActionFailed`,
-  unenforced `TypeDidProfile` metadata, `apply_company_graph_cypher_constraints`.
+Follow-ups (completed 2026-06-25):
+- [x] **odrl audit completeness:** `ConstraintFailed` events now emitted; all
+  matched permissions logged; `Duty` is an explicit documented no-op; decision
+  logic moved to a pure, unit-tested `build_decision`.
+- [x] **macro name consistency:** `#[derive(TypesecRole)]` now uses
+  `pascal_to_snake` like `policy!`.
+- [x] **DID security hardening:** `signing_input` covers `kid`+`nonce`; gateway
+  rejects replays + future-dated envelopes; `max_payload_bytes` enforced at
+  `wrap`. (AEAD associated-data binding intentionally deferred — the Ed25519
+  signature now covers every field and is the primary integrity guarantee.)
+- [x] **Dead code:** removed `RuleAction::matches_action` (genuinely dead).
+  *Corrected over-flags:* `TaskError::ActionFailed` is user-facing API (users
+  return it from `execute`'s closure); the rbac Cypher DDL helpers are used by
+  `examples/company_graph/graph_policy_schema.rs`; `TypeDidProfile` metadata
+  fields are protocol descriptors — all kept.
+- [~] Split the two large *test* files (`did/tests.rs`, `agent/tests/integration.rs`)
+  and the `typesec-python` impl — in progress.
+
+Still open (deliberately not auto-applied):
+- AEAD associated-data binding for DID envelopes (defense-in-depth; needs a
+  crypto-trait signature change across both key stores).
+- Wiring benches into CI.
