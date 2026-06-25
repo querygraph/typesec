@@ -24,6 +24,7 @@
 //!     .build();
 //! ```
 
+use std::ops::ControlFlow;
 use std::sync::Arc;
 
 use tracing::debug;
@@ -103,20 +104,14 @@ impl PolicyEngine for ComposedEngine {
             "composed engine check"
         );
 
-        match self.strategy {
-            CombineStrategy::PriorityOrder => {
-                priority_order(&self.engines, subject, action, resource, ctx)
-            }
-            CombineStrategy::AllowIfAll => {
-                allow_if_all(&self.engines, subject, action, resource, ctx)
-            }
-            CombineStrategy::AllowIfAny => {
-                allow_if_any(&self.engines, subject, action, resource, ctx)
-            }
-            CombineStrategy::DenyOverrides => {
-                deny_overrides(&self.engines, subject, action, resource, ctx)
+        let mut verdicts = Verdicts::new(self.strategy);
+        for engine in &self.engines {
+            let verdict = engine.check_with_context(subject, action, resource, ctx);
+            if let ControlFlow::Break(result) = verdicts.step(verdict) {
+                return result;
             }
         }
+        verdicts.finish()
     }
 
     fn check_with_context_async<'a>(
@@ -127,261 +122,146 @@ impl PolicyEngine for ComposedEngine {
         ctx: &'a RequestContext,
     ) -> PolicyFuture<'a> {
         Box::pin(async move {
-            match self.strategy {
-                CombineStrategy::PriorityOrder => {
-                    priority_order_async(&self.engines, subject, action, resource, ctx).await
-                }
-                CombineStrategy::AllowIfAll => {
-                    allow_if_all_async(&self.engines, subject, action, resource, ctx).await
-                }
-                CombineStrategy::AllowIfAny => {
-                    allow_if_any_async(&self.engines, subject, action, resource, ctx).await
-                }
-                CombineStrategy::DenyOverrides => {
-                    deny_overrides_async(&self.engines, subject, action, resource, ctx).await
+            let mut verdicts = Verdicts::new(self.strategy);
+            for engine in &self.engines {
+                let verdict = PolicyEngine::check_with_context_async(
+                    engine.as_ref(),
+                    subject,
+                    action,
+                    resource,
+                    ctx,
+                )
+                .await;
+                if let ControlFlow::Break(result) = verdicts.step(verdict) {
+                    return result;
                 }
             }
+            verdicts.finish()
         })
     }
 }
 
-// ── Strategy implementations ─────────────────────────────────────────────────
+// ── Strategy combination ─────────────────────────────────────────────────────
 
-fn priority_order(
-    engines: &[Arc<dyn PolicyEngine>],
-    subject: &SubjectId,
-    action: &str,
-    resource: &ResourceId,
-    ctx: &RequestContext,
-) -> PolicyResult {
-    for engine in engines {
-        match engine.check_with_context(subject, action, resource, ctx) {
-            PolicyResult::Delegate(_) => continue,
-            result => return result,
-        }
-    }
+/// The Delegate result returned when every engine abstained.
+fn all_delegated() -> PolicyResult {
     PolicyResult::delegate("composed", "all engines delegated")
 }
 
-async fn priority_order_async(
-    engines: &[Arc<dyn PolicyEngine>],
-    subject: &SubjectId,
-    action: &str,
-    resource: &ResourceId,
-    ctx: &RequestContext,
-) -> PolicyResult {
-    for engine in engines {
-        match PolicyEngine::check_with_context_async(
-            engine.as_ref(),
-            subject,
-            action,
-            resource,
-            ctx,
-        )
-        .await
-        {
-            PolicyResult::Delegate(_) => continue,
-            result => return result,
-        }
-    }
-    PolicyResult::delegate("composed", "all engines delegated")
+/// Running state for combining engine verdicts under a [`CombineStrategy`].
+///
+/// [`step`][Verdicts::step] folds in one engine's verdict and may short-circuit
+/// (returning [`ControlFlow::Break`] so the driver stops calling engines);
+/// [`finish`][Verdicts::finish] produces the combined result once every engine
+/// has been consulted. The sync and async drivers in the [`PolicyEngine`] impl
+/// both fold through this one type, so the two paths cannot drift apart.
+enum Verdicts {
+    /// `PriorityOrder`: the first non-Delegate verdict wins.
+    Priority,
+    /// `AllowIfAny`: the first Allow wins; otherwise the last Deny seen.
+    AllowIfAny { last_deny: Option<PolicyResult> },
+    /// `AllowIfAll`: any Deny overrides; else Allow if any engine was definitive.
+    AllowIfAll {
+        any_definitive: bool,
+        deny_reasons: Vec<String>,
+    },
+    /// `DenyOverrides`: the first Deny overrides; else Allow if any engine allowed.
+    DenyOverrides {
+        any_allow: bool,
+        first_deny: Option<String>,
+    },
 }
 
-fn allow_if_all(
-    engines: &[Arc<dyn PolicyEngine>],
-    subject: &SubjectId,
-    action: &str,
-    resource: &ResourceId,
-    ctx: &RequestContext,
-) -> PolicyResult {
-    let mut any_definitive = false;
-    let mut deny_reasons: Vec<String> = Vec::new();
-
-    for engine in engines {
-        match engine.check_with_context(subject, action, resource, ctx) {
-            PolicyResult::Allow => {
-                any_definitive = true;
-            }
-            PolicyResult::Delegate(_) => {
-                // Abstain — skip this engine.
-            }
-            PolicyResult::Deny(reason) => {
-                deny_reasons.push(reason);
-            }
+impl Verdicts {
+    fn new(strategy: CombineStrategy) -> Self {
+        match strategy {
+            CombineStrategy::PriorityOrder => Self::Priority,
+            CombineStrategy::AllowIfAny => Self::AllowIfAny { last_deny: None },
+            CombineStrategy::AllowIfAll => Self::AllowIfAll {
+                any_definitive: false,
+                deny_reasons: Vec::new(),
+            },
+            CombineStrategy::DenyOverrides => Self::DenyOverrides {
+                any_allow: false,
+                first_deny: None,
+            },
         }
     }
 
-    if !deny_reasons.is_empty() {
-        PolicyResult::Deny(deny_reasons.join("; "))
-    } else if any_definitive {
-        PolicyResult::Allow
-    } else {
-        PolicyResult::delegate("composed", "all engines delegated")
-    }
-}
-
-async fn allow_if_all_async(
-    engines: &[Arc<dyn PolicyEngine>],
-    subject: &SubjectId,
-    action: &str,
-    resource: &ResourceId,
-    ctx: &RequestContext,
-) -> PolicyResult {
-    let mut any_definitive = false;
-    let mut deny_reasons: Vec<String> = Vec::new();
-
-    for engine in engines {
-        match PolicyEngine::check_with_context_async(
-            engine.as_ref(),
-            subject,
-            action,
-            resource,
-            ctx,
-        )
-        .await
-        {
-            PolicyResult::Allow => {
-                any_definitive = true;
+    /// Fold in one engine's verdict, short-circuiting when the decision is final.
+    fn step(&mut self, verdict: PolicyResult) -> ControlFlow<PolicyResult> {
+        match self {
+            Self::Priority => match verdict {
+                PolicyResult::Delegate(_) => ControlFlow::Continue(()),
+                result => ControlFlow::Break(result),
+            },
+            Self::AllowIfAny { last_deny } => match verdict {
+                PolicyResult::Allow => ControlFlow::Break(PolicyResult::Allow),
+                deny @ PolicyResult::Deny(_) => {
+                    *last_deny = Some(deny);
+                    ControlFlow::Continue(())
+                }
+                PolicyResult::Delegate(_) => ControlFlow::Continue(()),
+            },
+            Self::AllowIfAll {
+                any_definitive,
+                deny_reasons,
+            } => {
+                match verdict {
+                    PolicyResult::Allow => *any_definitive = true,
+                    PolicyResult::Deny(reason) => deny_reasons.push(reason),
+                    PolicyResult::Delegate(_) => {}
+                }
+                ControlFlow::Continue(())
             }
-            PolicyResult::Delegate(_) => {}
-            PolicyResult::Deny(reason) => {
-                deny_reasons.push(reason);
+            Self::DenyOverrides {
+                any_allow,
+                first_deny,
+            } => {
+                match verdict {
+                    PolicyResult::Allow => *any_allow = true,
+                    PolicyResult::Deny(reason) => {
+                        if first_deny.is_none() {
+                            *first_deny = Some(reason);
+                        }
+                    }
+                    PolicyResult::Delegate(_) => {}
+                }
+                ControlFlow::Continue(())
             }
         }
     }
 
-    if !deny_reasons.is_empty() {
-        PolicyResult::Deny(deny_reasons.join("; "))
-    } else if any_definitive {
-        PolicyResult::Allow
-    } else {
-        PolicyResult::delegate("composed", "all engines delegated")
-    }
-}
-
-fn allow_if_any(
-    engines: &[Arc<dyn PolicyEngine>],
-    subject: &SubjectId,
-    action: &str,
-    resource: &ResourceId,
-    ctx: &RequestContext,
-) -> PolicyResult {
-    let mut last_deny: Option<PolicyResult> = None;
-
-    for engine in engines {
-        match engine.check_with_context(subject, action, resource, ctx) {
-            PolicyResult::Allow => return PolicyResult::Allow,
-            deny @ PolicyResult::Deny(_) => {
-                last_deny = Some(deny);
-            }
-            PolicyResult::Delegate(_) => {}
-        }
-    }
-
-    last_deny.unwrap_or_else(|| PolicyResult::delegate("composed", "all engines delegated"))
-}
-
-async fn allow_if_any_async(
-    engines: &[Arc<dyn PolicyEngine>],
-    subject: &SubjectId,
-    action: &str,
-    resource: &ResourceId,
-    ctx: &RequestContext,
-) -> PolicyResult {
-    let mut last_deny: Option<PolicyResult> = None;
-
-    for engine in engines {
-        match PolicyEngine::check_with_context_async(
-            engine.as_ref(),
-            subject,
-            action,
-            resource,
-            ctx,
-        )
-        .await
-        {
-            PolicyResult::Allow => return PolicyResult::Allow,
-            deny @ PolicyResult::Deny(_) => {
-                last_deny = Some(deny);
-            }
-            PolicyResult::Delegate(_) => {}
-        }
-    }
-
-    last_deny.unwrap_or_else(|| PolicyResult::delegate("composed", "all engines delegated"))
-}
-
-fn deny_overrides(
-    engines: &[Arc<dyn PolicyEngine>],
-    subject: &SubjectId,
-    action: &str,
-    resource: &ResourceId,
-    ctx: &RequestContext,
-) -> PolicyResult {
-    let mut any_allow = false;
-    let mut first_deny: Option<String> = None;
-
-    for engine in engines {
-        match engine.check_with_context(subject, action, resource, ctx) {
-            PolicyResult::Allow => {
-                any_allow = true;
-            }
-            PolicyResult::Deny(reason) => {
-                if first_deny.is_none() {
-                    first_deny = Some(reason);
+    /// Produce the combined verdict after every engine has been consulted.
+    fn finish(self) -> PolicyResult {
+        match self {
+            Self::Priority => all_delegated(),
+            Self::AllowIfAny { last_deny } => last_deny.unwrap_or_else(all_delegated),
+            Self::AllowIfAll {
+                any_definitive,
+                deny_reasons,
+            } => {
+                if !deny_reasons.is_empty() {
+                    PolicyResult::Deny(deny_reasons.join("; "))
+                } else if any_definitive {
+                    PolicyResult::Allow
+                } else {
+                    all_delegated()
                 }
             }
-            PolicyResult::Delegate(_) => {}
-        }
-    }
-
-    if let Some(reason) = first_deny {
-        PolicyResult::Deny(reason)
-    } else if any_allow {
-        PolicyResult::Allow
-    } else {
-        PolicyResult::delegate("composed", "all engines delegated")
-    }
-}
-
-async fn deny_overrides_async(
-    engines: &[Arc<dyn PolicyEngine>],
-    subject: &SubjectId,
-    action: &str,
-    resource: &ResourceId,
-    ctx: &RequestContext,
-) -> PolicyResult {
-    let mut any_allow = false;
-    let mut first_deny: Option<String> = None;
-
-    for engine in engines {
-        match PolicyEngine::check_with_context_async(
-            engine.as_ref(),
-            subject,
-            action,
-            resource,
-            ctx,
-        )
-        .await
-        {
-            PolicyResult::Allow => {
-                any_allow = true;
-            }
-            PolicyResult::Deny(reason) => {
-                if first_deny.is_none() {
-                    first_deny = Some(reason);
+            Self::DenyOverrides {
+                any_allow,
+                first_deny,
+            } => {
+                if let Some(reason) = first_deny {
+                    PolicyResult::Deny(reason)
+                } else if any_allow {
+                    PolicyResult::Allow
+                } else {
+                    all_delegated()
                 }
             }
-            PolicyResult::Delegate(_) => {}
         }
-    }
-
-    if let Some(reason) = first_deny {
-        PolicyResult::Deny(reason)
-    } else if any_allow {
-        PolicyResult::Allow
-    } else {
-        PolicyResult::delegate("composed", "all engines delegated")
     }
 }
 
@@ -431,194 +311,4 @@ impl PolicyEngineBuilder {
 // ── Unit tests ────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::policy::PolicyResult;
-    use std::sync::Arc;
-
-    fn subject() -> SubjectId {
-        SubjectId::from("s")
-    }
-
-    fn resource() -> ResourceId {
-        ResourceId::from("r")
-    }
-
-    fn allow() -> Arc<dyn PolicyEngine> {
-        struct A;
-        impl PolicyEngine for A {
-            fn check(&self, _: &SubjectId, _: &str, _: &ResourceId) -> PolicyResult {
-                PolicyResult::Allow
-            }
-        }
-        Arc::new(A)
-    }
-
-    fn deny(msg: &'static str) -> Arc<dyn PolicyEngine> {
-        struct D(&'static str);
-        impl PolicyEngine for D {
-            fn check(&self, _: &SubjectId, _: &str, _: &ResourceId) -> PolicyResult {
-                PolicyResult::Deny(self.0.into())
-            }
-        }
-        Arc::new(D(msg))
-    }
-
-    fn delegate() -> Arc<dyn PolicyEngine> {
-        struct G;
-        impl PolicyEngine for G {
-            fn check(&self, _: &SubjectId, _: &str, _: &ResourceId) -> PolicyResult {
-                PolicyResult::delegate("test", "abstain")
-            }
-        }
-        Arc::new(G)
-    }
-
-    // ── PriorityOrder ─────────────────────────────────────────────────────────
-
-    #[test]
-    fn priority_first_allow_wins() {
-        let e = PolicyEngineBuilder::new()
-            .add_engine(allow())
-            .add_engine(deny("second"))
-            .strategy(CombineStrategy::PriorityOrder)
-            .build();
-        assert_eq!(e.check(&subject(), "a", &resource()), PolicyResult::Allow);
-    }
-
-    #[test]
-    fn priority_skips_delegate() {
-        let e = PolicyEngineBuilder::new()
-            .add_engine(delegate())
-            .add_engine(allow())
-            .strategy(CombineStrategy::PriorityOrder)
-            .build();
-        assert_eq!(e.check(&subject(), "a", &resource()), PolicyResult::Allow);
-    }
-
-    #[test]
-    fn priority_all_delegate_returns_delegate() {
-        let e = PolicyEngineBuilder::new()
-            .add_engine(delegate())
-            .add_engine(delegate())
-            .strategy(CombineStrategy::PriorityOrder)
-            .build();
-        assert!(matches!(
-            e.check(&subject(), "a", &resource()),
-            PolicyResult::Delegate(_)
-        ));
-    }
-
-    // ── AllowIfAll ────────────────────────────────────────────────────────────
-
-    #[test]
-    fn allow_if_all_both_allow() {
-        let e = PolicyEngineBuilder::new()
-            .add_engine(allow())
-            .add_engine(allow())
-            .strategy(CombineStrategy::AllowIfAll)
-            .build();
-        assert_eq!(e.check(&subject(), "a", &resource()), PolicyResult::Allow);
-    }
-
-    #[test]
-    fn allow_if_all_one_deny_overrides() {
-        let e = PolicyEngineBuilder::new()
-            .add_engine(allow())
-            .add_engine(deny("no"))
-            .strategy(CombineStrategy::AllowIfAll)
-            .build();
-        assert!(matches!(
-            e.check(&subject(), "a", &resource()),
-            PolicyResult::Deny(_)
-        ));
-    }
-
-    #[test]
-    fn allow_if_all_collects_all_denial_reasons() {
-        let e = PolicyEngineBuilder::new()
-            .add_engine(deny("first"))
-            .add_engine(deny("second"))
-            .strategy(CombineStrategy::AllowIfAll)
-            .build();
-        let result = e.check(&subject(), "a", &resource());
-
-        assert!(
-            matches!(result, PolicyResult::Deny(reason) if reason.contains("first") && reason.contains("second"))
-        );
-    }
-
-    #[test]
-    fn allow_if_all_delegate_abstains() {
-        // Two allows and one delegate → Allow (delegate abstained)
-        let e = PolicyEngineBuilder::new()
-            .add_engine(allow())
-            .add_engine(delegate())
-            .add_engine(allow())
-            .strategy(CombineStrategy::AllowIfAll)
-            .build();
-        assert_eq!(e.check(&subject(), "a", &resource()), PolicyResult::Allow);
-    }
-
-    // ── AllowIfAny ────────────────────────────────────────────────────────────
-
-    #[test]
-    fn allow_if_any_single_allow_wins() {
-        let e = PolicyEngineBuilder::new()
-            .add_engine(deny("first"))
-            .add_engine(allow())
-            .strategy(CombineStrategy::AllowIfAny)
-            .build();
-        assert_eq!(e.check(&subject(), "a", &resource()), PolicyResult::Allow);
-    }
-
-    #[test]
-    fn allow_if_any_all_deny_returns_deny() {
-        let e = PolicyEngineBuilder::new()
-            .add_engine(deny("one"))
-            .add_engine(deny("two"))
-            .strategy(CombineStrategy::AllowIfAny)
-            .build();
-        assert!(matches!(
-            e.check(&subject(), "a", &resource()),
-            PolicyResult::Deny(_)
-        ));
-    }
-
-    // ── DenyOverrides ─────────────────────────────────────────────────────────
-
-    #[test]
-    fn deny_overrides_deny_beats_allow() {
-        let e = PolicyEngineBuilder::new()
-            .add_engine(allow())
-            .add_engine(deny("prohibited"))
-            .strategy(CombineStrategy::DenyOverrides)
-            .build();
-        assert!(matches!(
-            e.check(&subject(), "a", &resource()),
-            PolicyResult::Deny(_)
-        ));
-    }
-
-    #[test]
-    fn deny_overrides_no_deny_allows() {
-        let e = PolicyEngineBuilder::new()
-            .add_engine(allow())
-            .add_engine(delegate())
-            .strategy(CombineStrategy::DenyOverrides)
-            .build();
-        assert_eq!(e.check(&subject(), "a", &resource()), PolicyResult::Allow);
-    }
-
-    #[test]
-    fn deny_overrides_all_delegate_returns_delegate() {
-        let e = PolicyEngineBuilder::new()
-            .add_engine(delegate())
-            .strategy(CombineStrategy::DenyOverrides)
-            .build();
-        assert!(matches!(
-            e.check(&subject(), "a", &resource()),
-            PolicyResult::Delegate(_)
-        ));
-    }
-}
+mod tests;

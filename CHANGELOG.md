@@ -11,6 +11,11 @@ by release version, then by the date the logical change landed.
 - Began a human-reviewability refactor (see `CLAUDE.md`): moved the inline
   `typesec-core` `lattice` and `typestate` test modules into sibling
   `lattice/tests.rs` and `typestate/tests.rs` files via `#[cfg(test)] mod tests;`.
+- Consolidated `typesec-core` `combinator.rs` (624 lines) to 314: replaced the
+  eight near-duplicate sync/async strategy functions with one shared `Verdicts`
+  accumulator (decision logic written once, driven by trivial sync/async loops),
+  preserving short-circuit semantics; moved tests to `combinator/tests.rs`.
+- Removed the unused `serde` dependency from `typesec-core`.
 - Split `typesec-core` `secure_value.rs` (485 lines) into `secure_value.rs` (186)
   plus `secure_value/label.rs` (the privacy-label lattice and `Join`),
   `secure_value/error.rs`, and `secure_value/tests.rs`; re-exported the
