@@ -1,4 +1,3 @@
-
 use super::*;
 use crate::http::StaticHttpClient;
 use serde_json::json;
