@@ -5,6 +5,13 @@ by release version, then by the date the logical change landed.
 
 ## Unreleased
 
+- Added a GitHub Actions CI workflow (`.github/workflows/ci.yml`): rustfmt
+  (scoped to the typesec packages so the Grust path dependency isn't reformatted),
+  clippy `-D warnings`, `cargo test --workspace`, and a benchmark smoke step
+  (`cargo bench -- --test` runs every Criterion bench once) so a broken bench
+  fails CI instead of rotting. CI checks out a sibling `querygraph/grust` for the
+  local path dependency. Added `#![allow(dead_code)]` to the shared integration-
+  test `common` module (each themed test binary uses only a subset of fixtures).
 - Split the remaining oversized test files and the Python impl, so every `.rs`
   file in the workspace is now reviewable in one sitting: `did/tests.rs` (713)
   into a themed `did/tests/` directory (common + demo + ed25519 + ollama +

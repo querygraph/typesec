@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: build · test · benches
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out typesec
+        uses: actions/checkout@v4
+        with:
+          path: typesec
+
+      # typesec depends on Grust through a local *path* dependency
+      # (`../grust/crates/...` in the workspace Cargo.toml). CI must place a
+      # Grust checkout as a sibling of the typesec checkout so the path resolves.
+      - name: Check out Grust (path dependency)
+        uses: actions/checkout@v4
+        with:
+          repository: querygraph/grust
+          path: grust
+          # Pin to the Grust ref that provides the API typesec builds against;
+          # bump deliberately when the typesec/Grust contract changes. If
+          # querygraph/grust is private, also pass a token with read access:
+          #   token: ${{ secrets.GRUST_CHECKOUT_TOKEN }}
+          ref: cypher-gql-full
+
+      - name: Show toolchain (pinned by rust-toolchain.toml)
+        working-directory: typesec
+        run: |
+          rustup show
+          cargo --version
+
+      # `cargo fmt --all` also reformats the Grust path dependency, so the fmt
+      # check is scoped to the typesec packages.
+      - name: rustfmt
+        working-directory: typesec
+        run: >
+          cargo fmt --check
+          -p typesec-core -p typesec-rbac -p typesec-odrl -p typesec-agent
+          -p typesec-integrations -p typesec-macro -p typesec-cli
+          -p typesec-python -p typesec
+
+      - name: clippy
+        working-directory: typesec
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: test
+        working-directory: typesec
+        run: cargo test --workspace
+
+      # Run every Criterion benchmark once (no measurement) so a broken bench —
+      # like the ODRL bench that used to panic on malformed YAML — fails CI
+      # instead of rotting silently.
+      - name: bench smoke
+        working-directory: typesec
+        run: cargo bench --workspace -- --test

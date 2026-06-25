@@ -3,6 +3,11 @@
 //! Holds the audit-capture tracing harness, the YAML policy fixtures, and the
 //! `check_engine` helpers used across the themed integration test files.
 
+// This module is `mod common;`-included into every themed integration-test
+// binary, but each binary uses only the subset of fixtures it needs, so the
+// rest are legitimately "unused" per binary.
+#![allow(dead_code)]
+
 use std::sync::{Arc, Mutex, OnceLock};
 
 use tracing::{Event, Subscriber};

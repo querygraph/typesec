@@ -304,5 +304,8 @@ Follow-ups (completed 2026-06-25):
   `format`/`engine`/`decision`). **Every `.rs` file in the workspace is now
   ≤ ~390 lines.**
 
-Still open:
-- Wiring benches into CI.
+All review-derived follow-ups are now done. CI lives in
+`.github/workflows/ci.yml` (fmt scoped to typesec to skip the Grust path dep,
+clippy `-D warnings`, `cargo test --workspace`, and a bench smoke via
+`cargo bench -- --test`). CI must check out a sibling `querygraph/grust` for the
+path dependency — see the workflow comments for the ref/token notes.
