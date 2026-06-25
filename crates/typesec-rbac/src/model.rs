@@ -60,94 +60,67 @@ impl RbacPolicy {
             }
         }
 
-        // Detect cycles via DFS.
-        let mut visiting = std::collections::HashSet::new();
+        // Detect cycles via DFS. `walk_inheritance` surfaces a circular chain as
+        // an error; the visitor is a no-op because we only care about the walk
+        // completing without a cycle.
         for role in &self.roles {
-            self.check_cycle(&role.name, &mut visiting, &std::collections::HashSet::new())?;
+            walk_inheritance(&role.name, self, &mut |_| {})?;
         }
 
         Ok(())
     }
+}
 
-    fn check_cycle(
-        &self,
-        role_name: &str,
-        visited: &mut std::collections::HashSet<String>,
-        ancestors: &std::collections::HashSet<String>,
-    ) -> Result<(), String> {
-        if ancestors.contains(role_name) {
-            return Err(format!(
-                "circular inheritance detected for role '{role_name}'"
-            ));
-        }
-        if visited.contains(role_name) {
-            return Ok(());
-        }
+/// Depth-first walk over a role's inheritance closure.
+///
+/// Starting at `start`, this visits the role itself and then each role it
+/// transitively `inherits`, in declaration order, calling `visit` exactly once
+/// per reachable role. Roles are found by linear scan; an `inherits` entry that
+/// names no known role is silently skipped (unknown-parent validation lives in
+/// [`RbacPolicy::validate`]).
+///
+/// A circular inheritance chain is reported as
+/// `"circular inheritance detected for role '<name>'"`, naming the role at which
+/// the back-edge closes the cycle. Callers that run after
+/// [`RbacPolicy::validate`] has already rejected cycles can ignore the result.
+pub(crate) fn walk_inheritance(
+    start: &str,
+    policy: &RbacPolicy,
+    visit: &mut impl FnMut(&RoleDefinition),
+) -> Result<(), String> {
+    let mut visited = std::collections::HashSet::new();
+    let mut path = std::collections::HashSet::new();
+    walk_inheritance_inner(start, policy, &mut visited, &mut path, visit)
+}
 
-        let mut ancestors = ancestors.clone();
-        ancestors.insert(role_name.to_owned());
-
-        if let Some(role) = self.roles.iter().find(|r| r.name == role_name) {
-            for parent in &role.inherits {
-                self.check_cycle(parent, visited, &ancestors)?;
-            }
-        }
-
-        visited.insert(role_name.to_owned());
-        Ok(())
+fn walk_inheritance_inner(
+    role_name: &str,
+    policy: &RbacPolicy,
+    visited: &mut std::collections::HashSet<String>,
+    path: &mut std::collections::HashSet<String>,
+    visit: &mut impl FnMut(&RoleDefinition),
+) -> Result<(), String> {
+    if path.contains(role_name) {
+        return Err(format!(
+            "circular inheritance detected for role '{role_name}'"
+        ));
     }
+    if !visited.insert(role_name.to_owned()) {
+        return Ok(());
+    }
+
+    let Some(role) = policy.roles.iter().find(|r| r.name == role_name) else {
+        return Ok(());
+    };
+
+    path.insert(role_name.to_owned());
+    visit(role);
+    for parent in &role.inherits {
+        walk_inheritance_inner(parent, policy, visited, path, visit)?;
+    }
+    path.remove(role_name);
+    Ok(())
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    const VALID_YAML: &str = r#"
-roles:
-  - name: analyst
-    permissions: [read, read_sensitive]
-    resources: ["reports/*"]
-  - name: admin
-    inherits: [analyst]
-    permissions: [write, delete]
-    resources: ["*"]
-
-assignments:
-  - subject: "agent:pipeline"
-    roles: [analyst]
-"#;
-
-    #[test]
-    fn parses_valid_yaml() {
-        let policy = RbacPolicy::from_yaml(VALID_YAML).expect("parse should succeed");
-        assert_eq!(policy.roles.len(), 2);
-        assert_eq!(policy.assignments.len(), 1);
-        assert!(policy.validate().is_ok());
-    }
-
-    #[test]
-    fn detects_unknown_parent() {
-        let yaml = r#"
-roles:
-  - name: engineer
-    inherits: [nonexistent]
-assignments: []
-"#;
-        let policy = RbacPolicy::from_yaml(yaml).expect("parse ok");
-        assert!(policy.validate().is_err());
-    }
-
-    #[test]
-    fn detects_cycle() {
-        let yaml = r#"
-roles:
-  - name: a
-    inherits: [b]
-  - name: b
-    inherits: [a]
-assignments: []
-"#;
-        let policy = RbacPolicy::from_yaml(yaml).expect("parse ok");
-        assert!(policy.validate().is_err());
-    }
-}
+mod tests;

@@ -1,8 +1,10 @@
 //! RBAC policy engine — implements [`PolicyEngine`] for [`RbacPolicy`].
 
-use std::collections::{HashMap, HashSet};
+mod flatten;
+mod pattern;
 
-use glob::Pattern;
+use std::collections::HashMap;
+
 use tracing::debug;
 use typesec_core::{
     ResourceId, SubjectId,
@@ -10,6 +12,8 @@ use typesec_core::{
 };
 
 use crate::model::RbacPolicy;
+use flatten::flatten_role;
+use pattern::{GlobPattern, is_glob_pattern};
 
 /// A compiled, fast-lookup RBAC engine.
 ///
@@ -23,13 +27,7 @@ pub struct RbacEngine {
     /// Subject → set of effective (permission, resource_pattern) pairs.
     subject_grants: HashMap<String, Vec<CompiledGrant>>,
     /// Glob subject pattern → set of effective grants.
-    wildcard_subject_grants: Vec<(SubjectPattern, Vec<CompiledGrant>)>,
-}
-
-#[derive(Debug, Clone)]
-struct Grant {
-    permission: String,
-    resource_patterns: Vec<String>,
+    wildcard_subject_grants: Vec<(GlobPattern, Vec<CompiledGrant>)>,
 }
 
 /// A grant with its glob patterns validated and compiled once at load time.
@@ -40,61 +38,7 @@ struct Grant {
 #[derive(Debug, Clone)]
 struct CompiledGrant {
     permission: String,
-    resource_patterns: Vec<ResourcePattern>,
-}
-
-#[derive(Debug, Clone)]
-enum ResourcePattern {
-    /// The literal `"*"` — matches every resource, including across `/`.
-    Any,
-    /// A compiled glob. Note glob `*` does not cross `/` separators:
-    /// `reports/*` matches `reports/q1` but not `reports/2024/q1` (use
-    /// `reports/**` for that).
-    Glob(Pattern),
-}
-
-#[derive(Debug, Clone)]
-enum SubjectPattern {
-    /// The literal `"*"` — matches every subject.
-    Any,
-    /// A compiled glob.
-    Glob(Pattern),
-}
-
-impl SubjectPattern {
-    fn compile(pattern: &str) -> Result<Self, String> {
-        if pattern == "*" {
-            return Ok(Self::Any);
-        }
-        Pattern::new(pattern)
-            .map(Self::Glob)
-            .map_err(|e| format!("invalid subject pattern '{pattern}': {e}"))
-    }
-
-    fn matches(&self, subject: &str) -> bool {
-        match self {
-            Self::Any => true,
-            Self::Glob(pattern) => pattern.matches(subject),
-        }
-    }
-}
-
-impl ResourcePattern {
-    fn compile(pattern: &str) -> Result<Self, String> {
-        if pattern == "*" {
-            return Ok(Self::Any);
-        }
-        Pattern::new(pattern)
-            .map(Self::Glob)
-            .map_err(|e| format!("invalid resource pattern '{pattern}': {e}"))
-    }
-
-    fn matches(&self, resource: &str) -> bool {
-        match self {
-            Self::Any => true,
-            Self::Glob(pattern) => pattern.matches(resource),
-        }
-    }
+    resource_patterns: Vec<GlobPattern>,
 }
 
 impl RbacEngine {
@@ -105,7 +49,7 @@ impl RbacEngine {
         policy.validate()?;
 
         // Step 1: flatten role inheritance into effective (permission, resources) pairs.
-        let effective_roles: HashMap<String, Vec<Grant>> = {
+        let effective_roles: HashMap<String, Vec<flatten::Grant>> = {
             let mut map = HashMap::new();
             for role in &policy.roles {
                 let grants = flatten_role(&role.name, &policy);
@@ -117,7 +61,7 @@ impl RbacEngine {
         // Step 2: build subject → grants mapping, compiling patterns up front
         // so invalid globs fail the policy load instead of silently denying.
         let mut subject_grants: HashMap<String, Vec<CompiledGrant>> = HashMap::new();
-        let mut wildcard_subject_grants: Vec<(SubjectPattern, Vec<CompiledGrant>)> = Vec::new();
+        let mut wildcard_subject_grants: Vec<(GlobPattern, Vec<CompiledGrant>)> = Vec::new();
         for assignment in &policy.assignments {
             let mut all_grants: Vec<CompiledGrant> = Vec::new();
             for role_name in &assignment.roles {
@@ -128,15 +72,17 @@ impl RbacEngine {
                             resource_patterns: grant
                                 .resource_patterns
                                 .iter()
-                                .map(|p| ResourcePattern::compile(p))
+                                .map(|p| GlobPattern::compile(p, "resource"))
                                 .collect::<Result<_, _>>()?,
                         });
                     }
                 }
             }
             if is_glob_pattern(&assignment.subject) {
-                wildcard_subject_grants
-                    .push((SubjectPattern::compile(&assignment.subject)?, all_grants));
+                wildcard_subject_grants.push((
+                    GlobPattern::compile(&assignment.subject, "subject")?,
+                    all_grants,
+                ));
             } else {
                 subject_grants
                     .entry(assignment.subject.clone())
@@ -193,259 +139,5 @@ impl PolicyEngine for RbacEngine {
     }
 }
 
-fn is_glob_pattern(value: &str) -> bool {
-    value.contains(['*', '?', '['])
-}
-
-/// Recursively flatten a role's permissions by resolving inheritance.
-fn flatten_role(role_name: &str, policy: &RbacPolicy) -> Vec<Grant> {
-    let mut seen = HashSet::new();
-    flatten_role_inner(role_name, policy, &mut seen)
-}
-
-fn flatten_role_inner(
-    role_name: &str,
-    policy: &RbacPolicy,
-    seen: &mut HashSet<String>,
-) -> Vec<Grant> {
-    if !seen.insert(role_name.to_owned()) {
-        return vec![]; // cycle guard (already validated, but be safe)
-    }
-
-    let role = match policy.roles.iter().find(|r| r.name == role_name) {
-        Some(r) => r,
-        None => return vec![],
-    };
-
-    let mut grants: Vec<Grant> = Vec::new();
-
-    // Own permissions.
-    for perm in &role.permissions {
-        grants.push(Grant {
-            permission: perm.clone(),
-            resource_patterns: role.resources.clone(),
-        });
-    }
-
-    // Inherited permissions (recursive).
-    for parent_name in &role.inherits {
-        let inherited = flatten_role_inner(parent_name, policy, seen);
-        grants.extend(inherited);
-    }
-
-    grants
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    const YAML: &str = r#"
-roles:
-  - name: analyst
-    permissions: [read, read_sensitive]
-    resources: ["reports/*", "metrics/*"]
-  - name: engineer
-    permissions: [read, write, execute]
-    resources: ["code/*", "infra/*"]
-  - name: admin
-    inherits: [analyst, engineer]
-    permissions: [delete, delegate]
-    resources: ["*"]
-
-assignments:
-  - subject: "agent:data-pipeline"
-    roles: [analyst]
-  - subject: "agent:deploy-bot"
-    roles: [engineer]
-  - subject: "agent:superuser"
-    roles: [admin]
-"#;
-
-    fn engine() -> RbacEngine {
-        RbacEngine::from_yaml(YAML).expect("engine build should succeed")
-    }
-
-    fn check(e: &RbacEngine, subject: &str, action: &str, resource: &str) -> PolicyResult {
-        e.check(
-            &SubjectId::from(subject),
-            action,
-            &ResourceId::from(resource),
-        )
-    }
-
-    #[test]
-    fn analyst_can_read_reports() {
-        let e = engine();
-        assert_eq!(
-            check(&e, "agent:data-pipeline", "read", "reports/q1"),
-            PolicyResult::Allow
-        );
-    }
-
-    #[test]
-    fn analyst_cannot_write() {
-        let e = engine();
-        assert!(matches!(
-            check(&e, "agent:data-pipeline", "write", "reports/q1"),
-            PolicyResult::Deny(_)
-        ));
-    }
-
-    #[test]
-    fn engineer_can_write_code() {
-        let e = engine();
-        assert_eq!(
-            check(&e, "agent:deploy-bot", "write", "code/main.rs"),
-            PolicyResult::Allow
-        );
-    }
-
-    #[test]
-    fn engineer_cannot_access_reports() {
-        let e = engine();
-        assert!(matches!(
-            check(&e, "agent:deploy-bot", "read", "reports/q1"),
-            PolicyResult::Deny(_)
-        ));
-    }
-
-    #[test]
-    fn admin_inherits_analyst_and_engineer() {
-        let e = engine();
-        // Inherited from analyst:
-        assert_eq!(
-            check(&e, "agent:superuser", "read_sensitive", "reports/q1"),
-            PolicyResult::Allow
-        );
-        // Inherited from engineer:
-        assert_eq!(
-            check(&e, "agent:superuser", "execute", "code/deploy.sh"),
-            PolicyResult::Allow
-        );
-        // Own permissions:
-        assert_eq!(
-            check(&e, "agent:superuser", "delete", "anything"),
-            PolicyResult::Allow
-        );
-    }
-
-    #[test]
-    fn invalid_resource_pattern_fails_policy_load() {
-        let yaml = r#"
-roles:
-  - name: broken
-    permissions: [read]
-    resources: ["reports/[unclosed"]
-
-assignments:
-  - subject: "agent:x"
-    roles: [broken]
-"#;
-        let result = RbacEngine::from_yaml(yaml);
-        assert!(
-            result.is_err(),
-            "malformed glob must fail at load, not silently deny"
-        );
-    }
-
-    #[test]
-    fn unknown_subject_is_denied() {
-        let e = engine();
-        assert!(matches!(
-            check(&e, "agent:ghost", "read", "reports/q1"),
-            PolicyResult::Deny(_)
-        ));
-    }
-
-    #[test]
-    fn wildcard_subject_assignment_matches_globbed_agents() {
-        let yaml = r#"
-roles:
-  - name: deployer
-    permissions: [execute]
-    resources: ["infra/*"]
-
-assignments:
-  - subject: "agent:deploy-*"
-    roles: [deployer]
-"#;
-        let e = RbacEngine::from_yaml(yaml).expect("engine build should succeed");
-        assert_eq!(
-            check(&e, "agent:deploy-prod", "execute", "infra/restart"),
-            PolicyResult::Allow
-        );
-        assert!(matches!(
-            check(&e, "agent:build-prod", "execute", "infra/restart"),
-            PolicyResult::Deny(_)
-        ));
-    }
-
-    #[test]
-    fn exact_subject_and_wildcard_subject_grants_are_combined() {
-        let yaml = r#"
-roles:
-  - name: reader
-    permissions: [read]
-    resources: ["reports/*"]
-  - name: writer
-    permissions: [write]
-    resources: ["reports/*"]
-
-assignments:
-  - subject: "agent:report-*"
-    roles: [reader]
-  - subject: "agent:report-prod"
-    roles: [writer]
-"#;
-        let e = RbacEngine::from_yaml(yaml).expect("engine build should succeed");
-        assert_eq!(
-            check(&e, "agent:report-prod", "read", "reports/q1"),
-            PolicyResult::Allow
-        );
-        assert_eq!(
-            check(&e, "agent:report-prod", "write", "reports/q1"),
-            PolicyResult::Allow
-        );
-    }
-
-    #[test]
-    fn invalid_subject_pattern_fails_policy_load() {
-        let yaml = r#"
-roles:
-  - name: reader
-    permissions: [read]
-    resources: ["*"]
-
-assignments:
-  - subject: "agent:[broken"
-    roles: [reader]
-"#;
-        let result = RbacEngine::from_yaml(yaml);
-        assert!(
-            result.is_err(),
-            "malformed subject glob must fail at load, not silently deny"
-        );
-    }
-
-    #[test]
-    fn cyclic_role_inheritance_fails_engine_construction() {
-        let yaml = r#"
-roles:
-  - name: a
-    inherits: [b]
-    permissions: [read]
-    resources: ["*"]
-  - name: b
-    inherits: [a]
-    permissions: [write]
-    resources: ["*"]
-
-assignments:
-  - subject: "agent:x"
-    roles: [a]
-"#;
-
-        assert!(RbacEngine::from_yaml(yaml).is_err());
-    }
-}
+mod tests;

@@ -23,7 +23,7 @@
 //! in application code actually exist in the policy file. If you rename a role in
 //! YAML and regenerate, any code referencing the old name will fail to compile.
 
-use crate::model::RbacPolicy;
+use crate::model::{RbacPolicy, walk_inheritance};
 
 /// Generate Rust source code for the roles defined in `policy`.
 ///
@@ -86,55 +86,19 @@ pub fn generate_rust(policy: &RbacPolicy) -> String {
 }
 
 fn collect_all_permissions(role_name: &str, policy: &RbacPolicy) -> Vec<String> {
-    let mut seen_roles = std::collections::HashSet::new();
     let mut perms = std::collections::BTreeSet::new();
-    collect_perms_inner(role_name, policy, &mut seen_roles, &mut perms);
+    let _ = walk_inheritance(role_name, policy, &mut |role| {
+        perms.extend(role.permissions.iter().cloned());
+    });
     perms.into_iter().collect()
 }
 
-fn collect_perms_inner(
-    role_name: &str,
-    policy: &RbacPolicy,
-    seen: &mut std::collections::HashSet<String>,
-    out: &mut std::collections::BTreeSet<String>,
-) {
-    if !seen.insert(role_name.to_owned()) {
-        return;
-    }
-    if let Some(role) = policy.roles.iter().find(|r| r.name == role_name) {
-        for p in &role.permissions {
-            out.insert(p.clone());
-        }
-        for parent in &role.inherits {
-            collect_perms_inner(parent, policy, seen, out);
-        }
-    }
-}
-
 fn collect_all_resources(role_name: &str, policy: &RbacPolicy) -> Vec<String> {
-    let mut seen_roles = std::collections::HashSet::new();
     let mut resources = std::collections::BTreeSet::new();
-    collect_resources_inner(role_name, policy, &mut seen_roles, &mut resources);
+    let _ = walk_inheritance(role_name, policy, &mut |role| {
+        resources.extend(role.resources.iter().cloned());
+    });
     resources.into_iter().collect()
-}
-
-fn collect_resources_inner(
-    role_name: &str,
-    policy: &RbacPolicy,
-    seen: &mut std::collections::HashSet<String>,
-    out: &mut std::collections::BTreeSet<String>,
-) {
-    if !seen.insert(role_name.to_owned()) {
-        return;
-    }
-    if let Some(role) = policy.roles.iter().find(|r| r.name == role_name) {
-        for r in &role.resources {
-            out.insert(r.clone());
-        }
-        for parent in &role.inherits {
-            collect_resources_inner(parent, policy, seen, out);
-        }
-    }
 }
 
 /// Convert `snake_case` or `kebab-case` to `PascalCase`.
@@ -158,37 +122,4 @@ fn format_str_slice(items: &[String]) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::model::RbacPolicy;
-
-    const YAML: &str = r#"
-roles:
-  - name: analyst
-    permissions: [read, read_sensitive]
-    resources: ["reports/*"]
-  - name: admin
-    inherits: [analyst]
-    permissions: [write, delete]
-    resources: ["*"]
-assignments: []
-"#;
-
-    #[test]
-    fn generates_rust_structs() {
-        let policy = RbacPolicy::from_yaml(YAML).expect("parse ok");
-        let code = generate_rust(&policy);
-        assert!(code.contains("pub struct Analyst"));
-        assert!(code.contains("pub struct Admin"));
-        assert!(code.contains("fn name() -> &'static str { \"analyst\" }"));
-        // Admin should inherit analyst's permissions
-        assert!(code.contains("read_sensitive"));
-    }
-
-    #[test]
-    fn pascal_case_conversion() {
-        assert_eq!(super::to_pascal_case("data_analyst"), "DataAnalyst");
-        assert_eq!(super::to_pascal_case("deploy-bot"), "DeployBot");
-        assert_eq!(super::to_pascal_case("admin"), "Admin");
-    }
-}
+mod tests;

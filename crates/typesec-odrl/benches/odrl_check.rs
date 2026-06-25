@@ -7,15 +7,16 @@ fn odrl_policy() -> String {
     for idx in 0..10 {
         yaml.push_str(&format!(
             r#"  - uid: "policy-{idx}"
+    type: Set
     rules:
       - type: permission
         assignee: "agent:bench"
         action: read
         target: "reports/{idx}/*"
         constraints:
-          - left_operand: purpose
+          - leftOperand: purpose
             operator: eq
-            right_operand: analytics
+            rightOperand: analytics
 "#
         ));
     }

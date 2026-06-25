@@ -21,6 +21,16 @@ by release version, then by the date the logical change landed.
 - Began a human-reviewability refactor (see `CLAUDE.md`): moved the inline
   `typesec-core` `lattice` and `typestate` test modules into sibling
   `lattice/tests.rs` and `typestate/tests.rs` files via `#[cfg(test)] mod tests;`.
+- Refactored `typesec-rbac` and `typesec-odrl` for reviewability
+  (behavior-preserving, except a bench fix): split `graph_policy.rs` (1040) into a
+  `graph_policy/` module (schema/authored/typed_graph/rule/engine/eval/tests, each
+  ≤259 lines), `rbac/engine.rs` (451) into `engine/{pattern,flatten,tests}`, and
+  `odrl/engine.rs` (456) by separating the scan from the audit/decision step.
+  Unified the four duplicated role-inheritance DFS traversals into one
+  `walk_inheritance` walker and merged the identical `SubjectPattern`/
+  `ResourcePattern` into one `GlobPattern`. Moved inline tests to sibling files.
+  Fixed the `typesec-odrl` bench, which used `left_operand`/`right_operand` and
+  omitted the required `type:` field and so panicked on every run.
 - Refactored `typesec-integrations` for reviewability (behavior-preserving):
   split the 2635-line `did.rs` into a `did/` module (11 production files, each
   ≤386 lines, plus `did/tests.rs`) and `jwt.rs` (559) into a `jwt/` module;
