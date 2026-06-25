@@ -53,20 +53,15 @@ Python bindings: `maturin develop` in `crates/typesec-python` (see README).
 The book renders via `docs/book/build.sh` (Pandoc → EPUB/PDF/MOBI; see
 `docs/book/PUBLISH.md`). Toolchain: rustc 1.96 (no `rust-toolchain` pin).
 
-### Baseline caveats (as of 2026-06-25, clean `main`)
-- **`typesec-core` `compile_fail` test fails on a fresh checkout**: trybuild
-  compares `tests/ui/*.stderr` snapshots against the *installed* rustc's
-  diagnostics, and `cannot_create_new_agentstate.stderr` has drifted. 86 other
-  tests pass. Fix is `TRYBUILD=overwrite` — but the snapshot is
-  compiler-version-specific and there is no toolchain pin, so overwriting binds
-  it to one rustc. Real fix: add a `rust-toolchain.toml` pin (so snapshots are
-  reproducible) *then* refresh the snapshot. Until then, "green" means "green
-  except this one trybuild drift."
-- **`typesec-odrl/benches/odrl_check.rs` panics at `cargo bench`**: the inline
-  YAML uses `left_operand`/`right_operand` (must be `leftOperand`/`rightOperand`)
-  and omits the required `type:` field, so `from_yaml(...).expect()` panics. It
-  *compiles* (so `cargo test` is unaffected) but has never run. Benches are not
-  in CI.
+### Baseline caveats — both resolved 2026-06-25
+- **Trybuild snapshot drift (FIXED):** added `rust-toolchain.toml` pinning rustc
+  1.96.0 so `tests/ui/*.stderr` snapshots are reproducible, and refreshed the
+  drifted `cannot_create_new_agentstate.stderr`. `cargo test --workspace` is now
+  green on a fresh checkout. Bump the pin deliberately and refresh snapshots
+  with `TRYBUILD=overwrite`.
+- **odrl bench panic (FIXED):** `benches/odrl_check.rs` used
+  `left_operand`/`right_operand` and omitted the required `type:` field; both
+  corrected so it parses and runs. Benches are still not wired into CI.
 
 ## Human-reviewability standard (the goal this repo is held to)
 
@@ -262,6 +257,47 @@ JWKS/token builders) into a `#[cfg(test)]` test-support module.
 Apply the [B] fixes; fix the odrl bench YAML and add a `rust-toolchain.toml` pin
 (unblocks the trybuild snapshot). Update `CHANGELOG.md` throughout.
 
-## Progress
-- [x] Baseline captured; 5-crate + book review complete; this file written.
-- [ ] Phase A–E (see task list).
+## Progress (2026-06-25)
+
+Done — `cargo test --workspace` fully green; every production *logic* file is now
+≤ ~390 lines (was up to 2635), all unit tests live in sibling files:
+- [x] Review of all crates + the book; this file written.
+- [x] Toolchain pinned; trybuild + odrl bench fixed.
+- [x] **Phase A — typesec-core:** `policy.rs` 989→191 (+6 submodules),
+  `combinator.rs` 624→314 (8 strategy fns → one `Verdicts`), `secure_value.rs`
+  485→186, `capability.rs` 531→306, tests extracted from `lattice`/`typestate`;
+  `string_newtype!` unifies `SubjectId`/`ResourceId`; `serde` dep dropped; doc
+  fixes + `SecureValueError` re-exported.
+- [x] **Phase B — typesec-integrations:** `did.rs` 2635 → a `did/` module of 11
+  files (≤386) + `did/tests.rs`; `jwt.rs` 559 → `jwt/`; shared
+  `ProviderHttpEngine` dedups workos/arcade; reqwest 30s timeout.
+- [x] **Phase C — typesec-rbac/odrl:** `graph_policy.rs` 1040 → `graph_policy/`
+  (≤259); both engines split; one `walk_inheritance` replaces 4 DFS copies; one
+  `GlobPattern`.
+- [x] **Phase D (partial):** `typesec-macro/lib.rs` 441→91 (+modules);
+  `agent.rs`/`tool.rs` tests extracted; CLI `commands::engine` unifies
+  `detect_format`/loading/exit-codes.
+- [x] **Correctness:** odrl numeric operators; `run` exit codes + graph support;
+  `TaskError` re-exported; odrl bench.
+- [x] **Phase E (book):** factual fixes (Grust path-dep, `Capability` types,
+  `--json`, six integration modules, `typesec-python`, deps list, file list).
+
+Remaining (optional follow-ups, each isolated and low-risk):
+- [ ] Split the two large *test* files for symmetry: `did/tests.rs` (713) into
+  `did/tests/{demo,ed25519,typedid,ollama}.rs`; `typesec-agent/tests/integration.rs`
+  (624) into themed files (and fix its broken 01–13 numbering).
+- [ ] Split `typesec-python/src/lib.rs` impl into `format`/`engine`/`decision`
+  modules (the inline tests must stay — `cdylib` can't be linked by an external
+  test harness).
+- [ ] **odrl audit completeness:** emit `OdrlVerdict::ConstraintFailed` events and
+  log *all* matched permissions (not just the last). The `scan_candidates` /
+  `resolve_with_audit` split now isolates this. Decide `Duty` semantics (silent
+  no-op today).
+- [ ] **macro name consistency:** `#[derive(TypesecRole)]` uses `to_lowercase()`
+  while `policy!` uses `pascal_to_snake` — pick one (behavior change; check
+  examples).
+- [ ] **DID security hardening (design needed):** bind envelope metadata as AEAD
+  associated data + assert `signing_input` covers `kid`; add replay protection
+  (validate `created_time`, nonce cache); enforce `max_payload_bytes`.
+- [ ] Dead code: `RuleAction::matches_action`, `TaskError::ActionFailed`,
+  unenforced `TypeDidProfile` metadata, `apply_company_graph_cypher_constraints`.
