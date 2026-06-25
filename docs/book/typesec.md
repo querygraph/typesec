@@ -66,7 +66,7 @@ cargo check --workspace
 The Grust integration was also checked with:
 
 ```sh
-cargo check --example company_graph_grust_sail
+cargo check -p typesec-cli --example company_graph_grust_sail
 ```
 
 # The Problem
@@ -213,27 +213,23 @@ tests/python/test_cli_policy.py
 ```
 
 The root workspace uses Rust 2024. Common dependencies are declared in
-`[workspace.dependencies]`: `tokio`, `serde`, `serde_yaml`, `serde_json`,
-`clap`, `tracing`, `thiserror`, `anyhow`, `syn`, `quote`, `proc-macro2`, and
-`glob`, `jsonwebtoken`, and `reqwest`.
+`[workspace.dependencies]`: `tokio`/`futures` (async), `serde`/`serde_json` and
+`serde_yaml` (the last is the maintained `serde_norway` fork, renamed via Cargo's
+`package =` so existing `serde_yaml::` paths keep working), `garde` (validation),
+`clap`, `chrono`, `tracing`/`tracing-subscriber`, `thiserror`/`anyhow`, `zeroize`,
+`syn`/`quote`/`proc-macro2`, `glob`, `jsonwebtoken`, `reqwest`, the PyO3 binding
+(`pyo3`), and the DID envelope cryptography crates (`ed25519-dalek`,
+`x25519-dalek`, `chacha20poly1305`, `sha2`, `getrandom`).
 
-One important dependency change happened late in the day. The local example had
-originally depended on a path checkout of Grust:
-
-```toml
-grust = { path = "../../../grust/crates/grust", features = ["sail"] }
-```
-
-After the Grust crates were published, the dependency was moved to the
-published facade crate. The current examples use Grust 0.9 typed graph support,
-plus the separate `grust-cypher` crate for Cypher DDL and mutation syntax and
-the separate `grust-sail` crate for the Sail backend:
+The workspace depends on Grust through a **local path checkout**, not crates.io.
+The Cypher company-graph example therefore needs a sibling `../grust` checkout to
+build:
 
 ```toml
-[dev-dependencies]
-grust-graph = { version = "0.9.0", features = ["typed-zod-rs"] }
-grust-cypher = "0.9.0"
-grust-sail = "0.9.0"
+# workspace Cargo.toml
+grust-graph  = { version = "0.10.0", path = "../grust/crates/grust", features = ["typed-zod-rs"] }
+grust-cypher = { version = "0.10.0", path = "../grust/crates/grust-cypher" }
+grust-sail   = { version = "0.10.0", path = "../grust/crates/grust-sail" }
 ```
 
 The package is named `grust-graph`, while its library is imported as `grust`.
@@ -257,8 +253,8 @@ The central type is:
 ```rust
 pub struct Capability<P: Permission, R: Resource> {
     id: CapabilityId,
-    subject: String,
-    resource_id: String,
+    subject: SubjectId,
+    resource_id: ResourceId,
     issued_at: SystemTime,
     expires_at: SystemTime,
     revocation: Option<(RevocationEpoch, u64)>,
@@ -285,8 +281,8 @@ The constructor is deliberately hidden:
 
 ```rust
 pub(crate) fn new_minted(
-    subject: impl Into<String>,
-    resource_id: impl Into<String>,
+    subject: impl Into<SubjectId>,
+    resource_id: impl Into<ResourceId>,
     issued_at: SystemTime,
     ttl: Duration,
     revocation: Option<RevocationEpoch>,
@@ -1051,14 +1047,15 @@ The integrations crate is intentionally outside `typesec-core`. Provider
 adapters need HTTP clients, JWT validation, provider-specific endpoints, and
 credential handling. The core crate should not own those dependencies.
 
-The crate currently contains five modules:
+The crate currently contains six modules:
 
 ```text
-http     small injectable JSON HTTP client abstraction
-jwt      OIDC/JWT verification and JWT-claims policy engine
-workos   WorkOS FGA policy engine
-arcade   Arcade-style tool authorization policy engine
-did      DID documents, encrypted prompt envelopes, and Ollama bridge
+http          small injectable JSON HTTP client abstraction
+jwt           OIDC/JWT verification and JWT-claims policy engine
+workos        WorkOS FGA policy engine
+arcade        Arcade-style tool authorization policy engine
+pydantic_ai   capability metadata for Pydantic AI v2 tools
+did           DID documents, encrypted prompt envelopes, and Ollama bridge
 ```
 
 The `http` module provides `ReqwestHttpClient` for production use plus
@@ -1456,14 +1453,15 @@ graph and to write the graph through the Sail adapter when a Sail SparkConnect
 server is available at `127.0.0.1:50051`. If Sail is not running, the example
 still demonstrates the Typesec decisions and prints the graph.
 
-The import shape after switching to the published Grust crates is:
+The import shape is:
 
 ```rust
 use grust::prelude::*;
+use grust_sail::{SailConfig, SailGraphStore};
 ```
 
-That import pulls in the core graph types and, because the dependency enables
-the `sail` feature, the `SailConfig` and `SailGraphStore` adapter types.
+The prelude pulls in the core graph types; the Sail adapter types
+(`SailConfig`, `SailGraphStore`) come from the separate `grust-sail` crate.
 
 ## Python LangChain-Style Tool Gating
 
@@ -1540,7 +1538,7 @@ When the Grust dependency was switched from a path dependency to published
 crates, the Grust/Sail example was checked separately:
 
 ```sh
-cargo check --example company_graph_grust_sail
+cargo check -p typesec-cli --example company_graph_grust_sail
 ```
 
 All passed.
@@ -1580,8 +1578,9 @@ WorkOS handles enterprise identity and resource authorization, Arcade handles
 agent-oriented SaaS tool authorization, and Typesec makes the resulting local
 authority impossible to forget at the call site.
 
-The Grust crates were switched from a local path dependency to published
-crates.io packages, making the example reproducible outside this machine.
+The Grust dependency was bumped to the 0.10 line. It remains a local path
+dependency (`../grust`), so the Cypher company-graph example builds only
+alongside a sibling Grust checkout — see the Workspace Tour.
 
 A security review pass then hardened the runtime half of the system to match
 what the type-level half advertises. `SecureValue` stopped deriving `Debug`
@@ -1636,14 +1635,16 @@ agents sharing one policy service still needs a propagation story (a shared CRL,
 a policy-version claim, a shared epoch service, or capability re-validation
 against the engine) before revocation is truly global.
 
-The CLI is another pragmatic tradeoff. Rust code gets the strongest type-level
-story. Python code gets a subprocess oracle. That is weaker, but useful now. A
-future PyO3 crate could expose in-process policy checks, but the CLI boundary is
-easy to sandbox, inspect, and test.
+The CLI is one of two Python boundaries, and choosing between them is a
+pragmatic tradeoff. Rust code gets the strongest type-level story. Python code
+can either shell out to `typesec check --json` (a subprocess oracle: weaker, but
+trivial to sandbox, inspect, and test) or link the in-process `typesec-python`
+PyO3 extension (`typesec_native`), which is a built workspace crate, not a
+hypothetical — see the Macros/CLI and Python example sections.
 
-The published Grust integration also records a naming tradeoff. The package is
-published as `grust-graph`, but it exposes the facade library as `grust`, so
-examples can keep the natural `use grust::prelude::*` shape.
+The Grust integration also records a naming tradeoff. The package is named
+`grust-graph`, but it exposes the facade library as `grust`, so examples can keep
+the natural `use grust::prelude::*` shape.
 
 The graph-policy example now uses two validation boundaries. Zod validates
 author-facing YAML and JSON before the policy graph is built. Grust's
@@ -1692,21 +1693,26 @@ Fourth, extend revocation from in-process epochs to distributed ones.
 step is binding capabilities to a policy version or shared epoch service so a
 fleet of long-running agents sees a governance change at the same instant.
 
-Fifth, add `typesec check --json`. External agents need stable machine-readable
-answers:
+Fifth, build on the shipped `typesec check --json`. The flag already gives
+external agents a stable machine-readable answer:
 
 ```json
 {
-  "verdict": "allow",
+  "decision": "allow",
+  "allowed": true,
   "subject": "agent:data-pipeline",
   "action": "read",
   "resource": "reports/q1"
 }
 ```
 
-Sixth, deepen the Python story. The subprocess gate is enough to prove the
-boundary. A small Python package could wrap it cleanly. Later, a PyO3 binding
-could provide in-process checks for latency-sensitive integrations.
+The remaining work is schema versioning and richer delegation detail, not the
+flag itself.
+
+Sixth, deepen the now-shipped Python story. There are already two boundaries: the
+subprocess gate (`typesec check --json`) and the in-process `typesec-python`
+PyO3 extension. A higher-level, idiomatic Python package layered on top of
+`typesec_native` is the natural next step.
 
 Seventh, expand the Grust example into an end-to-end backend demo that can run
 against a known local service profile. The current example gracefully skips Sail

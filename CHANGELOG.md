@@ -5,6 +5,16 @@ by release version, then by the date the logical change landed.
 
 ## Unreleased
 
+- Corrected factual errors in `docs/book/typesec.md`: Grust is a local path
+  dependency at 0.10 (not a published crates.io 0.9 package), so the company-graph
+  example needs a sibling `../grust` checkout; `Capability`/`new_minted` carry
+  `SubjectId`/`ResourceId` fields (not `String`); `typesec-integrations` has six
+  modules including `pydantic_ai`; `grust-sail` is imported as its own crate, not
+  via `grust::prelude`; `typesec-python`/`typesec_native` is a shipped PyO3 crate
+  (not future work); `typesec check --json` is shipped and emits `decision`/
+  `allowed` (not `verdict`); example invocations use `-p typesec-cli`; the
+  dependency list reflects `serde_norway`, `garde`, `zeroize`, and the DID crypto
+  crates.
 - Pinned the toolchain to rust 1.96.0 via `rust-toolchain.toml` and refreshed the
   drifted `typesec-core` trybuild UI snapshot, so `cargo test` is green on a fresh
   checkout instead of failing on compiler-version-specific diagnostic wording.
