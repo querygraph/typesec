@@ -1611,6 +1611,27 @@ The unmaintained `serde_yaml` dependency was replaced by the API-compatible
 `serde_norway` fork via a package rename, and
 `thiserror` moved to major version 2.
 
+## Rialto (0.9.0)
+
+The Rialto release — the first of a Venetian-landmark release line — is a
+workspace-wide pass for human reviewability and a round of security and
+correctness hardening. Every Rust source file was brought under roughly four
+hundred lines: the 2,635-line DID module became an eleven-file `did/` directory,
+the policy engine, combinators, secure values, and the graph-policy engine were
+split along their natural seams, and every unit-test module moved into its own
+file. Duplicated logic was consolidated — eight combinator strategy functions
+became one accumulator, four role-inheritance traversals became one walker, and
+the WorkOS and Arcade providers now share a single HTTP shell.
+
+On the security side, DID envelopes now sign the `kid` and `nonce`, the gateway
+rejects replays and implausibly future-dated envelopes, the negotiated payload
+cap is enforced, and the encrypted payload is bound to its envelope identity as
+ChaCha20-Poly1305 associated data. The ODRL audit trail was completed: a rule
+that matches but fails a constraint now emits a `ConstraintFailed` event instead
+of vanishing, and every matched permission is recorded. The CLI `run` command
+now reflects its decision in the exit code, and a GitHub Actions pipeline runs
+formatting, clippy, tests, and a benchmark smoke step on every change.
+
 # Design Tradeoffs
 
 Typesec deliberately separates runtime policy from compile-time proof. This is a
@@ -1690,10 +1711,11 @@ Second, make generated policy code part of the examples. If `typesec generate`
 emits typed modules from an RBAC policy, downstream example code should compile
 against those generated types. Then a policy rename breaks code at compile time.
 
-Third, refine deny, delegate, and constraint-failure semantics. Today ODRL uses
-delegation for no matching rule or failed permission constraints. That is useful
-for composition, but applications may want clearer distinctions in logs and
-errors.
+Third, refine deny and delegate semantics. As of Rialto a failed permission
+constraint emits a `ConstraintFailed` audit event rather than vanishing, but the
+engine still *delegates* on both no-matching-rule and constraint-failure; some
+applications may want those two outcomes to diverge in their decision, not only
+in the audit trail.
 
 Fourth, extend revocation from in-process epochs to distributed ones.
 `RevocationEpoch` now invalidates live capabilities within a process; the next

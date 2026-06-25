@@ -129,7 +129,7 @@ The build script:
 
 1. Reads the workspace version from `Cargo.toml`.
 2. Reads `title_stem` from `docs/book/metadata.yaml`.
-3. Computes `kindle_name`, for example `typesec (0.8.0)`.
+3. Computes `kindle_name`, for example `typesec (0.9.0)`.
 4. Writes `docs/book/dist/VERSION.md`.
 5. Renders a temporary cover with `{{KINDLE_NAME}}` replaced.
 6. Builds a standalone cover PDF.

@@ -5,6 +5,18 @@ by release version, then by the date the logical change landed.
 
 ## Unreleased
 
+## 0.9.0 — Rialto
+
+### 2026-06-25
+
+Codename **Rialto** (Ponte di Rialto) — the first of the Venetian-landmark
+release line. A workspace-wide human-reviewability refactor (every `.rs` file is
+now ≤ ~406 lines, down from a 2635-line monolith; all unit tests live in their
+own files; duplicated logic consolidated), plus DID-envelope security hardening,
+ODRL audit-trail completion, a batch of correctness fixes, a comprehensive book
+review, and a new CI pipeline.
+
+- Bumped the workspace and all internal path-dependency constraints to `0.9.0`.
 - Added a GitHub Actions CI workflow (`.github/workflows/ci.yml`): rustfmt
   (scoped to the typesec packages so the Grust path dependency isn't reformatted),
   clippy `-D warnings`, `cargo test --workspace`, and a benchmark smoke step

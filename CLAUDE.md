@@ -3,7 +3,7 @@
 Type-safe security framework for Rust: capabilities, permission lattices, policy
 engines (RBAC / ODRL / graph), agent typestate, and provider integrations
 (OAuth/JWT, WorkOS, Arcade, Pydantic AI, DID/TypeDID messaging). Workspace at
-v0.8.0, edition 2024. A companion book ships from `docs/book/typesec.md`.
+v0.9.0, edition 2024. A companion book ships from `docs/book/typesec.md`.
 
 `AGENTS.md` holds the baseline working agreement (changelog discipline,
 prompt-boundary commits, artifact hygiene). This file extends it with
@@ -51,7 +51,8 @@ cargo fuzz run rbac_yaml         # from fuzz/ (excluded crate)
 
 Python bindings: `maturin develop` in `crates/typesec-python` (see README).
 The book renders via `docs/book/build.sh` (Pandoc → EPUB/PDF/MOBI; see
-`docs/book/PUBLISH.md`). Toolchain: rustc 1.96 (no `rust-toolchain` pin).
+`docs/book/PUBLISH.md`). Toolchain: rustc 1.96, pinned via `rust-toolchain.toml`.
+CI (`.github/workflows/ci.yml`) runs fmt/clippy/test + a bench smoke.
 
 ### Baseline caveats — both resolved 2026-06-25
 - **Trybuild snapshot drift (FIXED):** added `rust-toolchain.toml` pinning rustc
@@ -61,7 +62,8 @@ The book renders via `docs/book/build.sh` (Pandoc → EPUB/PDF/MOBI; see
   with `TRYBUILD=overwrite`.
 - **odrl bench panic (FIXED):** `benches/odrl_check.rs` used
   `left_operand`/`right_operand` and omitted the required `type:` field; both
-  corrected so it parses and runs. Benches are still not wired into CI.
+  corrected so it parses and runs. Benches now run in CI as a smoke step
+  (`cargo bench -- --test`).
 
 ## Human-reviewability standard (the goal this repo is held to)
 
@@ -310,3 +312,17 @@ All review-derived follow-ups are now done. CI lives in
 clippy `-D warnings`, `cargo test --workspace`, and a bench smoke via
 `cargo bench -- --test`). CI must check out a sibling `querygraph/grust` for the
 path dependency — see the workflow comments for the ref/token notes.
+
+## Releases
+
+Versioning is `0.MINOR.0` (a minor bump per release; in 0.x, minor may include
+breaking changes). Each release also gets a **codename after a Venetian
+landmark**, in order. To cut a release: bump the workspace version *and* the
+internal path-dep constraints (they must match or cargo errors), move the
+`CHANGELOG.md` `Unreleased` section under the new version, rebuild the book
+(`docs/book/build.sh` reads the version from `Cargo.toml`), then tag `vX.Y.Z`
+and create a GitHub release titled with the codename.
+
+| Version | Codename |
+|---|---|
+| 0.9.0 | Rialto (Ponte di Rialto) |
