@@ -290,8 +290,9 @@ Follow-ups (completed 2026-06-25):
   `pascal_to_snake` like `policy!`.
 - [x] **DID security hardening:** `signing_input` covers `kid`+`nonce`; gateway
   rejects replays + future-dated envelopes; `max_payload_bytes` enforced at
-  `wrap`. (AEAD associated-data binding intentionally deferred — the Ed25519
-  signature now covers every field and is the primary integrity guarantee.)
+  `wrap`; **AEAD associated-data binding** ties the ciphertext to the envelope's
+  routing/timing identity at the ChaCha20-Poly1305 layer (a second binding under
+  the signature), with a keystore-level rejection test.
 - [x] **Dead code:** removed `RuleAction::matches_action` (genuinely dead).
   *Corrected over-flags:* `TaskError::ActionFailed` is user-facing API (users
   return it from `execute`'s closure); the rbac Cypher DDL helpers are used by
@@ -303,7 +304,5 @@ Follow-ups (completed 2026-06-25):
   `format`/`engine`/`decision`). **Every `.rs` file in the workspace is now
   ≤ ~390 lines.**
 
-Still open (deliberately not auto-applied):
-- AEAD associated-data binding for DID envelopes (defense-in-depth; needs a
-  crypto-trait signature change across both key stores).
+Still open:
 - Wiring benches into CI.

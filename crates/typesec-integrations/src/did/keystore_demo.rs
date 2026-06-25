@@ -93,11 +93,17 @@ impl DidKeyStore for DemoDidKeyStore {
         recipient_public_key: &[u8],
         plaintext: &[u8],
         nonce: &[u8],
+        associated_data: &[u8],
     ) -> Result<String, DidError> {
         let sender_key = self.key(sender)?;
         let ciphertext = xor_stream(
             plaintext,
-            &derive_shared_key(&sender_key.private_key, recipient_public_key, nonce),
+            &derive_shared_key(
+                &sender_key.private_key,
+                recipient_public_key,
+                nonce,
+                associated_data,
+            ),
         );
         Ok(hex_encode(&ciphertext))
     }
@@ -108,17 +114,28 @@ impl DidKeyStore for DemoDidKeyStore {
         sender_public_key: &[u8],
         nonce: &[u8],
         ciphertext_hex: &str,
+        associated_data: &[u8],
     ) -> Result<Vec<u8>, DidError> {
         let recipient_key = self.key(recipient)?;
         let ciphertext = hex_decode(ciphertext_hex)?;
         Ok(xor_stream(
             &ciphertext,
-            &derive_shared_key(&recipient_key.private_key, sender_public_key, nonce),
+            &derive_shared_key(
+                &recipient_key.private_key,
+                sender_public_key,
+                nonce,
+                associated_data,
+            ),
         ))
     }
 }
 
-fn derive_shared_key(private_key: &[u8], public_key: &[u8], nonce: &[u8]) -> Vec<u8> {
+fn derive_shared_key(
+    private_key: &[u8],
+    public_key: &[u8],
+    nonce: &[u8],
+    associated_data: &[u8],
+) -> Vec<u8> {
     let mut seed = Vec::with_capacity(private_key.len() + public_key.len() + nonce.len());
     if private_key <= public_key {
         seed.extend_from_slice(private_key);
@@ -128,6 +145,7 @@ fn derive_shared_key(private_key: &[u8], public_key: &[u8], nonce: &[u8]) -> Vec
         seed.extend_from_slice(private_key);
     }
     seed.extend_from_slice(nonce);
+    seed.extend_from_slice(associated_data);
     derive_bytes(b"typesec-did-shared", &seed, 32)
 }
 

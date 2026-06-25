@@ -13,6 +13,12 @@ by release version, then by the date the logical change landed.
   (with the inconsistent numeric test-name prefixes dropped); and
   `typesec-python/src/lib.rs` (403 → 237) into `format`/`engine`/`decision`
   modules (tests stay inline — the crate is `cdylib`).
+- Bound DID envelope ciphertext to its routing/timing identity as AEAD
+  associated data: `encrypt_for`/`decrypt_for` now take an `associated_data`
+  argument (the envelope's `id`/`from`/`to`/`created_time`/`expires_time`), so the
+  ChaCha20-Poly1305 tag — not just the Ed25519 signature — binds the ciphertext to
+  its envelope and a captured ciphertext cannot be lifted into a different one. A
+  keystore-level test verifies a mismatched AAD is rejected.
 - Hardened `typesec-integrations` DID envelopes: the signed `signing_input` now
   covers `kid` and `nonce` (so neither can be swapped without breaking the
   Ed25519 signature); `DidMessageGateway` rejects replays of already-opened

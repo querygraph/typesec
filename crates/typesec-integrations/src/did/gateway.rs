@@ -189,6 +189,7 @@ impl DidMessageGateway {
         // sender document.
         let sender_agreement_keys = sender_document.key_agreement_keys()?;
         let nonce = hex_decode(&envelope.nonce)?;
+        let aad = envelope.associated_data();
         let mut plaintext = None;
         for sender_agreement_key in sender_agreement_keys {
             match self.key_store.decrypt_for(
@@ -196,6 +197,7 @@ impl DidMessageGateway {
                 &sender_agreement_key.public_key()?,
                 &nonce,
                 &envelope.ciphertext,
+                &aad,
             ) {
                 Ok(opened) => {
                     plaintext = Some(opened);

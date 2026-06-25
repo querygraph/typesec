@@ -142,6 +142,7 @@ impl DidEnvelope {
         let now = unix_time();
         let recipient_document = resolver.resolve(&to)?;
         let recipient_key = recipient_document.key_agreement_key()?;
+        let recipient_public = recipient_key.public_key()?;
         let sender_document = resolver.resolve(&from)?;
         let kid = sender_document
             .authentication
@@ -149,12 +150,8 @@ impl DidEnvelope {
             .cloned()
             .ok_or(DidError::MissingAuthentication)?;
         let nonce = random_nonce()?;
-        let ciphertext = key_store.encrypt_for(
-            &from,
-            &recipient_key.public_key()?,
-            plaintext.as_ref(),
-            &nonce,
-        )?;
+        // Build the envelope first (empty ciphertext) so the AEAD can bind to its
+        // routing/timing identity, then encrypt and sign.
         let mut envelope = Self {
             id,
             message_type: "https://typesec.dev/did/message/v1/prompt".to_owned(),
@@ -166,9 +163,17 @@ impl DidEnvelope {
             typedid: None,
             kid,
             nonce: hex_encode(&nonce),
-            ciphertext,
+            ciphertext: String::new(),
             signature: String::new(),
         };
+        let aad = envelope.associated_data();
+        envelope.ciphertext = key_store.encrypt_for(
+            &envelope.from,
+            &recipient_public,
+            plaintext.as_ref(),
+            &nonce,
+            &aad,
+        )?;
         envelope.signature = key_store.sign(&envelope.from, envelope.signing_input().as_bytes())?;
         Ok(envelope)
     }
@@ -190,6 +195,7 @@ impl DidEnvelope {
         let now = unix_time();
         let recipient_document = resolver.resolve(&to)?;
         let recipient_key = recipient_document.key_agreement_key()?;
+        let recipient_public = recipient_key.public_key()?;
         let sender_document = resolver.resolve(&from)?;
         let kid = sender_document
             .authentication
@@ -198,12 +204,6 @@ impl DidEnvelope {
             .ok_or(DidError::MissingAuthentication)?;
         let id = reply_did.to_string();
         let nonce = random_nonce()?;
-        let ciphertext = key_store.encrypt_for(
-            &from,
-            &recipient_key.public_key()?,
-            plaintext.as_ref(),
-            &nonce,
-        )?;
         let mut envelope = Self {
             id,
             message_type: "https://typesec.dev/did/message/v1/reply".to_owned(),
@@ -220,9 +220,17 @@ impl DidEnvelope {
             typedid: None,
             kid,
             nonce: hex_encode(&nonce),
-            ciphertext,
+            ciphertext: String::new(),
             signature: String::new(),
         };
+        let aad = envelope.associated_data();
+        envelope.ciphertext = key_store.encrypt_for(
+            &envelope.from,
+            &recipient_public,
+            plaintext.as_ref(),
+            &nonce,
+            &aad,
+        )?;
         envelope.signature = key_store.sign(&envelope.from, envelope.signing_input().as_bytes())?;
         Ok(envelope)
     }
@@ -287,6 +295,32 @@ impl DidEnvelope {
                 seed.as_bytes(),
             )),
         }
+    }
+
+    /// AEAD associated data binding the ciphertext to the envelope's
+    /// routing/timing identity.
+    ///
+    /// Includes only fields that are set before encryption and never mutated
+    /// afterward (`id`, `from`, `to`, `created_time`, `expires_time`) — notably
+    /// **not** `message_type` or `typedid`, which [`typedid`][Self::typedid]
+    /// rewrites after encrypting. Those are still authenticated by the signature
+    /// (see [`signing_input`][Self::signing_input]); the AAD adds a second,
+    /// AEAD-level binding so the ciphertext can't be lifted into a different
+    /// envelope even if the signature layer were bypassed.
+    pub(super) fn associated_data(&self) -> Vec<u8> {
+        format!(
+            "{}\n{}\n{}\n{}\n{}",
+            self.id,
+            self.from,
+            self.to
+                .iter()
+                .map(Did::as_str)
+                .collect::<Vec<_>>()
+                .join(","),
+            self.created_time,
+            self.expires_time,
+        )
+        .into_bytes()
     }
 
     /// Canonical bytes the sender signs and the recipient verifies.

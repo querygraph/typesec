@@ -201,3 +201,57 @@ fn ed25519_retired_key_rejects_old_signatures() {
             .any(|kid| kid == &envelope.kid)
     );
 }
+
+#[test]
+fn ed25519_aead_rejects_wrong_associated_data() {
+    let (alice, agent, resolver, keys) = ed25519_fixture();
+    let alice_doc = resolver.resolve(&alice).expect("alice document");
+    let alice_agreement = alice_doc
+        .key_agreement_key()
+        .expect("alice agreement key")
+        .public_key()
+        .expect("alice agreement public");
+    let agent_doc = resolver.resolve(&agent).expect("agent document");
+    let agent_agreement = agent_doc
+        .key_agreement_key()
+        .expect("agent agreement key")
+        .public_key()
+        .expect("agent agreement public");
+    let nonce = [7u8; 12];
+
+    // alice → agent, ciphertext bound to AAD "context-one".
+    let ciphertext = keys
+        .encrypt_for(
+            &alice,
+            &agent_agreement,
+            b"secret payload",
+            &nonce,
+            b"context-one",
+        )
+        .expect("encrypt");
+
+    // The matching AAD decrypts.
+    assert_eq!(
+        keys.decrypt_for(
+            &agent,
+            &alice_agreement,
+            &nonce,
+            &ciphertext,
+            b"context-one"
+        )
+        .expect("decrypt with matching aad"),
+        b"secret payload",
+    );
+
+    // A different AAD is rejected by the AEAD tag, even with the right keys/nonce.
+    assert!(matches!(
+        keys.decrypt_for(
+            &agent,
+            &alice_agreement,
+            &nonce,
+            &ciphertext,
+            b"context-two"
+        ),
+        Err(DidError::DecryptionFailed)
+    ));
+}

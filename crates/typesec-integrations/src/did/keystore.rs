@@ -22,21 +22,29 @@ pub trait DidKeyStore: Send + Sync {
     ) -> Result<(), DidError>;
 
     /// Encrypt bytes from `sender` to the recipient public key.
+    ///
+    /// `associated_data` is authenticated but not encrypted (AEAD AAD); the
+    /// recipient must supply the identical bytes to [`decrypt_for`][Self::decrypt_for].
     fn encrypt_for(
         &self,
         sender: &Did,
         recipient_public_key: &[u8],
         plaintext: &[u8],
         nonce: &[u8],
+        associated_data: &[u8],
     ) -> Result<String, DidError>;
 
     /// Decrypt bytes addressed to `recipient` from the sender public key.
+    ///
+    /// `associated_data` must match the bytes passed to [`encrypt_for`][Self::encrypt_for]
+    /// or authentication fails.
     fn decrypt_for(
         &self,
         recipient: &Did,
         sender_public_key: &[u8],
         nonce: &[u8],
         ciphertext_hex: &str,
+        associated_data: &[u8],
     ) -> Result<Vec<u8>, DidError>;
 }
 
@@ -330,9 +338,10 @@ impl DidKeyStore for Ed25519DidKeyStore {
         recipient_public_key: &[u8],
         plaintext: &[u8],
         nonce: &[u8],
+        associated_data: &[u8],
     ) -> Result<String, DidError> {
         use chacha20poly1305::KeyInit;
-        use chacha20poly1305::aead::Aead;
+        use chacha20poly1305::aead::{Aead, Payload};
         let sender_key = &self.active_record(sender)?.key;
         let recipient: [u8; 32] = recipient_public_key
             .try_into()
@@ -343,7 +352,13 @@ impl DidKeyStore for Ed25519DidKeyStore {
         let nonce: [u8; 12] = nonce.try_into().map_err(|_| DidError::InvalidNonce)?;
         let cipher = chacha20poly1305::ChaCha20Poly1305::new(&Self::aead_key(shared.as_bytes()));
         let ciphertext = cipher
-            .encrypt(&chacha20poly1305::Nonce::from(nonce), plaintext)
+            .encrypt(
+                &chacha20poly1305::Nonce::from(nonce),
+                Payload {
+                    msg: plaintext,
+                    aad: associated_data,
+                },
+            )
             .map_err(|_| DidError::EncryptionFailed)?;
         Ok(hex_encode(&ciphertext))
     }
@@ -354,9 +369,10 @@ impl DidKeyStore for Ed25519DidKeyStore {
         sender_public_key: &[u8],
         nonce: &[u8],
         ciphertext_hex: &str,
+        associated_data: &[u8],
     ) -> Result<Vec<u8>, DidError> {
         use chacha20poly1305::KeyInit;
-        use chacha20poly1305::aead::Aead;
+        use chacha20poly1305::aead::{Aead, Payload};
         let sender: [u8; 32] = sender_public_key
             .try_into()
             .map_err(|_| DidError::InvalidKey("x25519 public key must be 32 bytes".into()))?;
@@ -374,9 +390,13 @@ impl DidKeyStore for Ed25519DidKeyStore {
                 .diffie_hellman(&x25519_dalek::PublicKey::from(sender));
             let cipher =
                 chacha20poly1305::ChaCha20Poly1305::new(&Self::aead_key(shared.as_bytes()));
-            if let Ok(plaintext) =
-                cipher.decrypt(&chacha20poly1305::Nonce::from(nonce), ciphertext.as_slice())
-            {
+            if let Ok(plaintext) = cipher.decrypt(
+                &chacha20poly1305::Nonce::from(nonce),
+                Payload {
+                    msg: ciphertext.as_slice(),
+                    aad: associated_data,
+                },
+            ) {
                 return Ok(plaintext);
             }
         }
