@@ -58,6 +58,29 @@ fn count_operand_reads_custom_context() {
 }
 
 #[test]
+fn count_ordering_is_numeric_not_lexicographic() {
+    // "10" <= "5" is true lexicographically but false numerically.
+    let c = make_constraint("count", ConstraintOperator::Lteq, "5");
+    let ctx = ConstraintContext::default().with("count", "10");
+    assert!(!evaluate(&c, &ctx), "count 10 must not satisfy `lteq 5`");
+
+    // And the genuinely-satisfied numeric case still passes.
+    let c = make_constraint("count", ConstraintOperator::Gt, "5");
+    let ctx = ConstraintContext::default().with("count", "10");
+    assert!(evaluate(&c, &ctx), "count 10 must satisfy `gt 5`");
+}
+
+#[test]
+fn non_numeric_ordering_falls_back_to_lexicographic() {
+    let c = make_constraint("tier", ConstraintOperator::Lt, "gold");
+    let ctx = ConstraintContext::default().with("tier", "bronze");
+    assert!(
+        evaluate(&c, &ctx),
+        "\"bronze\" < \"gold\" lexicographically"
+    );
+}
+
+#[test]
 fn custom_operand_reads_custom_context() {
     let c = make_constraint("region", ConstraintOperator::Eq, "eu");
     let ctx = ConstraintContext::default().with("region", "eu");

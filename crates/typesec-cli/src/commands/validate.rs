@@ -4,6 +4,8 @@ use anyhow::Result;
 use clap::Args;
 use std::path::PathBuf;
 
+use super::engine::detect_format;
+
 #[derive(Args)]
 pub struct ValidateArgs {
     /// Path to the policy YAML file.
@@ -70,19 +72,4 @@ pub fn run(args: ValidateArgs) -> Result<()> {
     }
 
     Ok(())
-}
-
-fn detect_format(explicit: &Option<String>, yaml: &str) -> Option<String> {
-    if let Some(f) = explicit {
-        return Some(f.clone());
-    }
-    if yaml.contains("graph_policy:") || yaml.contains("\"graph_policy\"") {
-        Some("graph".into())
-    } else if yaml.contains("roles:") && yaml.contains("assignments:") {
-        Some("rbac".into())
-    } else if yaml.contains("policies:") && yaml.contains("rules:") {
-        Some("odrl".into())
-    } else {
-        None
-    }
 }

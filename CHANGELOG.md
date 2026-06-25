@@ -5,6 +5,19 @@ by release version, then by the date the logical change landed.
 
 ## Unreleased
 
+- Fixed `typesec-odrl` numeric constraint comparison: ordering operators
+  (`lt`/`lteq`/`gt`/`gteq`) now compare numerically when both operands parse as
+  numbers, so `count lteq 5` correctly rejects a count of 10 (previously it
+  compared lexicographically, where `"10" <= "5"`). String operands still order
+  lexicographically. Added regression tests.
+- Made `typesec run` reflect the policy decision in its exit code (0 allow /
+  1 deny / 2 delegate) like `typesec check`, so a denied task no longer exits 0.
+  Unified the three divergent CLI `detect_format` copies (and the engine-loading
+  and request-context boilerplate) into one shared `commands::engine` module, so
+  every subcommand recognises the same formats — `run` now supports graph
+  policies, which it previously could not detect.
+- Re-exported `TaskError` from `typesec-agent` and the `typesec` umbrella so the
+  error type returned by `execute`/`invoke`/`TaskResult` can be named by callers.
 - Corrected factual errors in `docs/book/typesec.md`: Grust is a local path
   dependency at 0.10 (not a published crates.io 0.9 package), so the company-graph
   example needs a sibling `../grust` checkout; `Capability`/`new_minted` carry

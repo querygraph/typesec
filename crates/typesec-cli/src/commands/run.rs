@@ -3,9 +3,11 @@
 use anyhow::Result;
 use clap::Args;
 use serde::Deserialize;
-use std::{path::PathBuf, sync::Arc};
+use std::path::PathBuf;
 use typesec_agent::SecureAgent;
 use typesec_core::{Credentials, RequestContext, ResourceId, SubjectId, policy::PolicyResult};
+
+use super::engine::{detect_format, exit_for_result, load_engine, request_context};
 
 #[derive(Args)]
 pub struct RunArgs {
@@ -83,13 +85,9 @@ pub async fn run(args: RunArgs) -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("--task is required unless --scenario is used"))?;
 
     let yaml = std::fs::read_to_string(policy)?;
-    let context = args
-        .purpose
-        .as_ref()
-        .map_or_else(RequestContext::default, |purpose| {
-            RequestContext::default().with_purpose(purpose.clone())
-        });
-    let engine = load_engine(&yaml, &args.format)?;
+    let context = request_context(args.purpose.as_deref());
+    let format = detect_format(&args.format, &yaml);
+    let engine = load_engine(format.as_deref(), &yaml)?;
 
     // Create and authenticate the agent.
     let agent = SecureAgent::new(engine);
@@ -110,53 +108,22 @@ pub async fn run(args: RunArgs) -> Result<()> {
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| format!("simulation:{agent_id}"));
 
-    match task.as_str() {
-        "summarize" | "read" => {
-            let _ = simulate_task(
-                &agent,
-                "read",
-                &resource_id,
-                &context,
-                "Task: summarize/read completed",
-            )
-            .await;
-        }
-        "write" => {
-            let _ = simulate_task(
-                &agent,
-                "write",
-                &resource_id,
-                &context,
-                "Task: write completed",
-            )
-            .await;
-        }
-        "infer" => {
-            let _ = simulate_task(
-                &agent,
-                "ai:infer",
-                &resource_id,
-                &context,
-                "Task: AI inference completed",
-            )
-            .await;
-        }
-        "exfiltrate" => {
-            let _ = simulate_task(
-                &agent,
-                "ai:exfiltrate",
-                &resource_id,
-                &context,
-                "Task: exfiltrate (DANGEROUS!)",
-            )
-            .await;
-        }
+    // Map the CLI task name to its policy action and success message.
+    let (action, success_message) = match task.as_str() {
+        "summarize" | "read" => ("read", "Task: summarize/read completed"),
+        "write" => ("write", "Task: write completed"),
+        "infer" => ("ai:infer", "Task: AI inference completed"),
+        "exfiltrate" => ("ai:exfiltrate", "Task: exfiltrate (DANGEROUS!)"),
         other => {
             anyhow::bail!("Unknown task: '{other}'. Try: summarize, write, infer, exfiltrate");
         }
-    }
+    };
 
-    Ok(())
+    let result = simulate_task(&agent, action, &resource_id, &context, success_message).await;
+
+    // Reflect the decision in the exit code (0 allow / 1 deny / 2 delegate),
+    // like `typesec check`, so `run` is safe to gate CI on.
+    exit_for_result(&result);
 }
 
 async fn run_scenario(path: &PathBuf) -> Result<()> {
@@ -170,7 +137,8 @@ async fn run_scenario(path: &PathBuf) -> Result<()> {
         doc.scenario.policy.clone()
     };
     let policy_yaml = std::fs::read_to_string(&policy_path)?;
-    let engine = load_engine(&policy_yaml, &doc.scenario.format)?;
+    let format = detect_format(&doc.scenario.format, &policy_yaml);
+    let engine = load_engine(format.as_deref(), &policy_yaml)?;
 
     println!(
         "Scenario: {}",
@@ -182,13 +150,7 @@ async fn run_scenario(path: &PathBuf) -> Result<()> {
 
     let mut mismatches = 0usize;
     for (idx, step) in doc.scenario.steps.iter().enumerate() {
-        let context = step
-            .purpose
-            .as_ref()
-            .or(doc.scenario.purpose.as_ref())
-            .map_or_else(RequestContext::default, |purpose| {
-                RequestContext::default().with_purpose(purpose.clone())
-            });
+        let context = request_context(step.purpose.as_deref().or(doc.scenario.purpose.as_deref()));
         let agent = SecureAgent::new(engine.clone())
             .authenticate_unverified(Credentials::new(step.agent.clone(), "scenario-token"))
             .map_err(|e| anyhow::anyhow!("scenario step {} auth failed: {e}", idx + 1))?;
@@ -227,24 +189,6 @@ async fn run_scenario(path: &PathBuf) -> Result<()> {
     }
 
     Ok(())
-}
-
-fn load_engine(
-    yaml: &str,
-    format: &Option<String>,
-) -> Result<Arc<dyn typesec_core::policy::PolicyEngine>> {
-    match detect_format(format, yaml).as_deref() {
-        Some("rbac") => {
-            let e = typesec_rbac::RbacEngine::from_yaml(yaml).map_err(|e| anyhow::anyhow!(e))?;
-            Ok(Arc::new(e))
-        }
-        Some("odrl") => {
-            let engine =
-                typesec_odrl::OdrlEngine::from_yaml(yaml).map_err(|e| anyhow::anyhow!(e))?;
-            Ok(Arc::new(engine))
-        }
-        _ => anyhow::bail!("Could not detect policy format"),
-    }
 }
 
 /// Simulate a task by requesting a capability and printing the result.
@@ -294,18 +238,5 @@ fn result_label(result: &PolicyResult) -> &'static str {
         PolicyResult::Deny(_) => "deny",
         PolicyResult::Delegate(_) => "delegate",
         _ => "unknown",
-    }
-}
-
-fn detect_format(explicit: &Option<String>, yaml: &str) -> Option<String> {
-    if let Some(f) = explicit {
-        return Some(f.clone());
-    }
-    if yaml.contains("roles:") {
-        Some("rbac".into())
-    } else if yaml.contains("policies:") {
-        Some("odrl".into())
-    } else {
-        None
     }
 }

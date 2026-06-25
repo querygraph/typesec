@@ -6,8 +6,10 @@ use serde::Serialize;
 use std::path::PathBuf;
 use typesec_core::{
     ResourceId, SubjectId,
-    policy::{PolicyEngine, PolicyResult, RequestContext},
+    policy::PolicyResult,
 };
+
+use super::engine::{detect_format, exit_for_result, load_engine, request_context};
 
 #[derive(Args)]
 pub struct CheckArgs {
@@ -43,35 +45,12 @@ pub struct CheckArgs {
 pub fn run(args: CheckArgs) -> Result<()> {
     let yaml = std::fs::read_to_string(&args.policy)?;
     let format = detect_format(&args.format, &yaml);
-    let context = args
-        .purpose
-        .as_ref()
-        .map_or_else(RequestContext::default, |purpose| {
-            RequestContext::default().with_purpose(purpose.clone())
-        });
+    let context = request_context(args.purpose.as_deref());
     let subject = SubjectId::from(args.subject.as_str());
     let resource = ResourceId::from(args.resource.as_str());
 
-    let result = match format.as_deref() {
-        Some("rbac") => {
-            let engine =
-                typesec_rbac::RbacEngine::from_yaml(&yaml).map_err(|e| anyhow::anyhow!(e))?;
-            PolicyEngine::check_with_context(&engine, &subject, &args.action, &resource, &context)
-        }
-        Some("odrl") => {
-            let engine =
-                typesec_odrl::OdrlEngine::from_yaml(&yaml).map_err(|e| anyhow::anyhow!(e))?;
-            PolicyEngine::check_with_context(&engine, &subject, &args.action, &resource, &context)
-        }
-        Some("graph") => {
-            let engine = typesec_rbac::GraphPolicyEngine::from_yaml(&yaml)
-                .map_err(|e| anyhow::anyhow!(e))?;
-            engine.check_with_context(&subject, &args.action, &resource, &context)
-        }
-        _ => anyhow::bail!(
-            "Could not detect policy format. Use --format rbac, --format odrl, or --format graph"
-        ),
-    };
+    let engine = load_engine(format.as_deref(), &yaml)?;
+    let result = engine.check_with_context(&subject, &args.action, &resource, &context);
 
     if args.json {
         print_json_result(&args, format.as_deref(), &result)?;
@@ -116,15 +95,6 @@ fn print_json_result(args: &CheckArgs, format: Option<&str>, result: &PolicyResu
     let response = CheckJsonResponse::new(args, format, result);
     println!("{}", serde_json::to_string_pretty(&response)?);
     Ok(())
-}
-
-fn exit_for_result(result: &PolicyResult) -> ! {
-    match result {
-        PolicyResult::Allow => std::process::exit(0),
-        PolicyResult::Deny(_) => std::process::exit(1),
-        PolicyResult::Delegate(_) => std::process::exit(2),
-        _ => std::process::exit(1),
-    }
 }
 
 #[derive(Serialize)]
@@ -180,20 +150,5 @@ impl<'a> CheckJsonResponse<'a> {
             delegate_engine,
             delegate_context,
         }
-    }
-}
-
-fn detect_format(explicit: &Option<String>, yaml: &str) -> Option<String> {
-    if let Some(f) = explicit {
-        return Some(f.clone());
-    }
-    if yaml.contains("graph_policy:") || yaml.contains("\"graph_policy\"") {
-        Some("graph".into())
-    } else if yaml.contains("roles:") {
-        Some("rbac".into())
-    } else if yaml.contains("policies:") {
-        Some("odrl".into())
-    } else {
-        None
     }
 }

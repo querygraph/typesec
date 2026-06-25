@@ -127,11 +127,29 @@ fn evaluate_string_op(op: &ConstraintOperator, actual: &str, expected: &str) -> 
         ConstraintOperator::Eq => actual == expected,
         ConstraintOperator::Neq => actual != expected,
         ConstraintOperator::IsPartOf => expected.split(',').any(|v| v.trim() == actual),
-        // Lexicographic ordering for strings (reasonable for simple tags).
-        ConstraintOperator::Lt => actual < expected,
-        ConstraintOperator::Lteq => actual <= expected,
-        ConstraintOperator::Gt => actual > expected,
-        ConstraintOperator::Gteq => actual >= expected,
+        // Ordering operators compare numerically when *both* sides parse as
+        // numbers — so `count lteq 5` is arithmetic (10 is not <= 5), not
+        // lexicographic (where "10" < "5"). Non-numeric operands (string tags)
+        // fall back to lexicographic ordering.
+        ConstraintOperator::Lt
+        | ConstraintOperator::Lteq
+        | ConstraintOperator::Gt
+        | ConstraintOperator::Gteq => match (actual.parse::<f64>(), expected.parse::<f64>()) {
+            (Ok(a), Ok(b)) => apply_ordering(op, &a, &b),
+            _ => apply_ordering(op, &actual, &expected),
+        },
+    }
+}
+
+/// Apply an ordering operator to two comparable values. Eq/Neq/IsPartOf are
+/// handled by the caller and never reach here.
+fn apply_ordering<T: PartialOrd>(op: &ConstraintOperator, a: &T, b: &T) -> bool {
+    match op {
+        ConstraintOperator::Lt => a < b,
+        ConstraintOperator::Lteq => a <= b,
+        ConstraintOperator::Gt => a > b,
+        ConstraintOperator::Gteq => a >= b,
+        _ => false,
     }
 }
 
