@@ -259,8 +259,9 @@ Apply the [B] fixes; fix the odrl bench YAML and add a `rust-toolchain.toml` pin
 
 ## Progress (2026-06-25)
 
-Done — `cargo test --workspace` fully green; every production *logic* file is now
-≤ ~390 lines (was up to 2635), all unit tests live in sibling files:
+Done — `cargo test --workspace` fully green; every `.rs` file is now ≤ ~406 lines
+(was up to 2635; the largest is `did/keystore.rs`), all unit tests live in
+sibling files:
 - [x] Review of all crates + the book; this file written.
 - [x] Toolchain pinned; trybuild + odrl bench fixed.
 - [x] **Phase A — typesec-core:** `policy.rs` 989→191 (+6 submodules),
@@ -302,7 +303,7 @@ Follow-ups (completed 2026-06-25):
   `agent/tests/integration.rs` 624 → `tests/common/` + 4 themed files, broken
   numbering fixed) and the `typesec-python` impl (`lib.rs` 403 → 237 +
   `format`/`engine`/`decision`). **Every `.rs` file in the workspace is now
-  ≤ ~390 lines.**
+  ≤ ~406 lines** (the largest is `did/keystore.rs`).
 
 All review-derived follow-ups are now done. CI lives in
 `.github/workflows/ci.yml` (fmt scoped to typesec to skip the Grust path dep,
