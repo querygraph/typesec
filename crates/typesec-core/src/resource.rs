@@ -1,61 +1,10 @@
 //! Resource trait — the thing a capability grants access to.
 
-use std::fmt;
-use std::ops::Deref;
+use crate::string_id::string_newtype;
 
-/// Stable identifier for one protected resource instance.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct ResourceId(String);
-
-impl ResourceId {
-    /// Borrow this identifier as a string slice.
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl From<&str> for ResourceId {
-    fn from(value: &str) -> Self {
-        Self(value.to_owned())
-    }
-}
-
-impl From<String> for ResourceId {
-    fn from(value: String) -> Self {
-        Self(value)
-    }
-}
-
-impl AsRef<str> for ResourceId {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-
-impl PartialEq<str> for ResourceId {
-    fn eq(&self, other: &str) -> bool {
-        self.as_str() == other
-    }
-}
-
-impl PartialEq<&str> for ResourceId {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-
-impl Deref for ResourceId {
-    type Target = str;
-
-    fn deref(&self) -> &Self::Target {
-        self.as_str()
-    }
-}
-
-impl fmt::Display for ResourceId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
+string_newtype! {
+    /// Stable identifier for one protected resource instance.
+    ResourceId
 }
 
 /// A resource that can be protected by a [`Capability`][crate::Capability].

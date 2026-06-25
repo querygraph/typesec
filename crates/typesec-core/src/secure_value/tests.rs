@@ -1,4 +1,3 @@
-
 use super::*;
 use crate::{
     capability::{Capability, DEFAULT_CAPABILITY_TTL},

@@ -11,6 +11,12 @@ by release version, then by the date the logical change landed.
 - Began a human-reviewability refactor (see `CLAUDE.md`): moved the inline
   `typesec-core` `lattice` and `typestate` test modules into sibling
   `lattice/tests.rs` and `typestate/tests.rs` files via `#[cfg(test)] mod tests;`.
+- Split `typesec-core` `policy.rs` (989 lines) into `policy.rs` (191, the engine
+  traits + wiring) plus focused `policy/` submodules: `subject`, `result`,
+  `error`, `audit`, `mint`, `fallback`, and `tests`. Unified the identical
+  `SubjectId`/`ResourceId` newtypes behind a single `string_newtype!` macro
+  (`string_id.rs`), deduplicated the sync/async mint terminal step into one
+  `finish_mint` helper, and corrected the stale `new_unchecked` flow comment.
 - Consolidated `typesec-core` `combinator.rs` (624 lines) to 314: replaced the
   eight near-duplicate sync/async strategy functions with one shared `Verdicts`
   accumulator (decision logic written once, driven by trivial sync/async loops),
