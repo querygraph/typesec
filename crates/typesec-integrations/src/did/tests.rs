@@ -126,6 +126,28 @@ fn encrypted_prompt_opens_as_secret_secure_value() {
 }
 
 #[test]
+fn replayed_envelope_is_rejected() {
+    let (alice, agent, resolver, keys) = fixture();
+    let envelope = DidEnvelope::prompt(
+        "msg-replay",
+        alice,
+        agent.clone(),
+        DidMessageBody::infer_prompt("prompt/session/replay"),
+        "one-shot payload",
+        &resolver,
+        &keys,
+    )
+    .expect("envelope");
+
+    let gateway = DidMessageGateway::new(Arc::new(resolver), Arc::new(keys), agent);
+    gateway.open_prompt(&envelope).expect("first open succeeds");
+    assert!(
+        matches!(gateway.open_prompt(&envelope), Err(DidError::Replayed(_))),
+        "re-opening the same envelope must be rejected as a replay"
+    );
+}
+
+#[test]
 fn did_ollama_client_sends_plaintext_only_after_capabilities() {
     let (alice, agent, resolver, keys) = fixture();
     let envelope = DidEnvelope::prompt(

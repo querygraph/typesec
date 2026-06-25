@@ -232,6 +232,16 @@ pub trait SecureEnvelopeAdapter {
             self.protocol(),
             request.mode,
         )?;
+        // Enforce the negotiated payload-size cap (a DoS/amplification guard at
+        // the gateway boundary) rather than merely advertising it.
+        if let Some(max) = profile.max_payload_bytes
+            && request.payload.len() > max
+        {
+            return Err(DidError::PayloadTooLarge {
+                size: request.payload.len(),
+                max,
+            });
+        }
         let conversation = TypeDidConversation::new(
             request.conversation_id,
             request.mode,

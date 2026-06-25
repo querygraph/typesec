@@ -5,6 +5,16 @@ by release version, then by the date the logical change landed.
 
 ## Unreleased
 
+- Hardened `typesec-integrations` DID envelopes: the signed `signing_input` now
+  covers `kid` and `nonce` (so neither can be swapped without breaking the
+  Ed25519 signature); `DidMessageGateway` rejects replays of already-opened
+  envelopes (a pruned signature cache) and envelopes dated implausibly far in the
+  future (clock-skew bound); and `SecureEnvelopeAdapter::wrap` enforces the
+  negotiated `max_payload_bytes` (previously advertised but never checked). New
+  `DidError` variants: `Replayed`, `NotYetValid`, `PayloadTooLarge`. Binding
+  envelope metadata as AEAD associated data remains a future defense-in-depth
+  item — the signature is the primary integrity guarantee and now covers every
+  field.
 - Completed the `typesec-odrl` audit trail: rules that match the target but fail
   a constraint now emit an `OdrlVerdict::ConstraintFailed` event (previously
   dropped silently), and *all* matched permissions are logged on an Allow (not

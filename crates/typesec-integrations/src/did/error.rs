@@ -49,6 +49,25 @@ pub enum DidError {
     /// Envelope has expired.
     #[error("DID envelope has expired")]
     Expired,
+    /// Envelope is dated too far in the future (beyond the clock-skew tolerance).
+    #[error("DID envelope is not yet valid (created {created}, now {now})")]
+    NotYetValid {
+        /// Envelope `created_time` (unix seconds).
+        created: u64,
+        /// Current time (unix seconds).
+        now: u64,
+    },
+    /// Envelope was already seen — a likely replay.
+    #[error("DID envelope replay detected for message {0}")]
+    Replayed(String),
+    /// Payload exceeds the negotiated `max_payload_bytes` limit.
+    #[error("DID payload too large: {size} bytes exceeds limit of {max}")]
+    PayloadTooLarge {
+        /// Actual payload size in bytes.
+        size: usize,
+        /// Negotiated maximum.
+        max: usize,
+    },
     /// Key material has the wrong size or encoding.
     #[error("invalid key material: {0}")]
     InvalidKey(String),

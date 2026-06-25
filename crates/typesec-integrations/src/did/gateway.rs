@@ -1,6 +1,7 @@
 //! Envelope-verifying gateways and the verified-message/attestation types.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use serde::{Deserialize, Serialize};
 use typesec_core::{SecureValue, resource::GenericResource, secure_value::Secret};
@@ -97,11 +98,17 @@ pub struct VerifiedDidPrompt {
     pub prompt: SecureValue<Secret, String, GenericResource>,
 }
 
+/// Tolerated clock skew (seconds) for an envelope dated in the future.
+const CLOCK_SKEW_SECS: u64 = 300;
+
 /// Verifies DID envelopes and converts encrypted payloads into `SecureValue`s.
 pub struct DidMessageGateway {
     resolver: Arc<dyn DidResolver>,
     key_store: Arc<dyn DidKeyStore>,
     recipient: Did,
+    /// Signatures of already-opened envelopes mapped to their expiry, for replay
+    /// rejection. Pruned to the active (non-expired) window on each open.
+    seen: Mutex<HashMap<String, u64>>,
 }
 
 impl DidMessageGateway {
@@ -115,7 +122,23 @@ impl DidMessageGateway {
             resolver,
             key_store,
             recipient,
+            seen: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Reject an envelope already opened within its validity window (replay).
+    /// Call only after the signature has verified, so the cache holds only
+    /// authentic envelopes.
+    fn guard_replay(&self, envelope: &DidEnvelope, now: u64) -> Result<(), DidError> {
+        let mut seen = self.seen.lock().unwrap_or_else(PoisonError::into_inner);
+        seen.retain(|_, expires| *expires >= now);
+        if seen
+            .insert(envelope.signature.clone(), envelope.expires_time)
+            .is_some()
+        {
+            return Err(DidError::Replayed(envelope.id.clone()));
+        }
+        Ok(())
     }
 
     /// Verify, decrypt, and protect a DID prompt envelope.
@@ -139,6 +162,14 @@ impl DidMessageGateway {
         if envelope.expires_time < now {
             return Err(DidError::Expired);
         }
+        // Reject envelopes dated implausibly far in the future (clock skew or a
+        // forged timestamp), which bounds the replay window from both ends.
+        if envelope.created_time > now.saturating_add(CLOCK_SKEW_SECS) {
+            return Err(DidError::NotYetValid {
+                created: envelope.created_time,
+                now,
+            });
+        }
 
         let sender_document = self.resolver.resolve(&envelope.from)?;
         let sender_key = sender_document.authentication_key(&envelope.kid)?;
@@ -147,6 +178,9 @@ impl DidMessageGateway {
             envelope.signing_input().as_bytes(),
             &envelope.signature,
         )?;
+
+        // Signature is authentic: reject a replay of an already-seen envelope.
+        self.guard_replay(envelope, now)?;
 
         // Decryption uses the sender's *key-agreement* key, which may be a
         // different key (X25519) than the authentication key (Ed25519). During

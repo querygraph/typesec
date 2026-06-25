@@ -289,6 +289,12 @@ impl DidEnvelope {
         }
     }
 
+    /// Canonical bytes the sender signs and the recipient verifies.
+    ///
+    /// This MUST cover every security-relevant field of the envelope. In
+    /// particular `kid` (which key authenticates the sender) and `nonce` (which
+    /// drives the AEAD) are included so they cannot be swapped without breaking
+    /// the signature. When adding a field to [`DidEnvelope`], add it here too.
     pub(super) fn signing_input(&self) -> String {
         let reply_to = self
             .body
@@ -297,7 +303,7 @@ impl DidEnvelope {
             .map(|reference| format!("{}\n{}", reference.id, reference.digest))
             .unwrap_or_default();
         let base = format!(
-            "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
+            "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
             self.id,
             self.message_type,
             self.from,
@@ -311,7 +317,9 @@ impl DidEnvelope {
             self.body.action,
             self.body.resource,
             self.body.privacy,
-            reply_to
+            reply_to,
+            self.kid,
+            self.nonce,
         );
         if let Some(typedid) = self.typedid.as_ref() {
             format!(
