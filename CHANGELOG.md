@@ -5,6 +5,9 @@ by release version, then by the date the logical change landed.
 
 ## Unreleased
 
+- Added `CLAUDE.md` capturing the workspace architecture, a human-reviewability
+  standard (file-size budget, tests in their own files, DRY), a full review of
+  every crate and the book, and a phased refactor plan toward that standard.
 - Added Pydantic AI v2 capability metadata for Typesec-protected tools in
   `typesec-integrations`, plus Python adapter examples and tests that map a
   TypeDID policy gate into a deferred Pydantic AI capability bundle.
