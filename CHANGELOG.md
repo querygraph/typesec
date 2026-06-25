@@ -51,6 +51,9 @@ by release version, then by the date the logical change landed.
   `arcade.rs` no longer duplicate the bearer-auth HTTP shell; moved all inline
   test modules to sibling files; and gave `ReqwestHttpClient` a 30s request
   timeout (was unbounded). Public API unchanged; 34 tests green, clippy clean.
+- Moved the inline `typesec-agent` `agent.rs` and `tool.rs` test modules into
+  sibling `agent/tests.rs` and `tool/tests.rs` files (`agent.rs` 373 → 255,
+  `tool.rs` 326 → 205).
 - Split `typesec-macro` `lib.rs` (441 lines) into `lib.rs` (91, the proc-macro
   entry points) plus `shared.rs` (permission validation + name casing),
   `role_derive.rs`, `policy_dsl.rs`, and `tests.rs`; corrected the derive doc
