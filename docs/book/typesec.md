@@ -164,6 +164,42 @@ type system can know every business rule at compile time. The type system
 enforces that sensitive operations require a proof. Runtime policy decides
 whether the proof should be minted.
 
+# Architecture at a Glance
+
+Before the prose tour, five pictures of the load-bearing pieces. They also live,
+in source form, in `docs/architecture.md` (rendered inline on GitHub).
+
+The single most important diagram is the capability-minting flow. A `Capability`
+is unforgeable proof, and the only production path to one runs a `PolicyEngine`
+and emits an audit event; a denial is a typed error, never a capability.
+
+![The capability-minting flow](docs/book/diagrams/capability-flow.png)
+
+The workspace is nine crates layered on `typesec-core`; the umbrella `typesec`
+crate re-exports the rest behind feature flags.
+
+![Workspace layering](docs/book/diagrams/layering.png)
+
+Every engine — RBAC, the graph engine, ODRL, and the provider-backed engines —
+implements the same `check_with_context` contract returning `Allow`, `Deny`, or
+`Delegate`, so they compose under `ComposedEngine` and `FallbackEngine`.
+
+![One policy contract, many engines](docs/book/diagrams/engine-contract.png)
+
+`SecureAgent<S>` is a typestate machine: the capability-requesting and `execute`
+methods exist only on the `Authenticated` state, so calling them on an
+unauthenticated agent is a compile error, not a runtime check.
+
+![The agent typestate](docs/book/diagrams/agent-typestate.png)
+
+When agents collaborate, a prompt is sealed into a DID envelope whose ciphertext
+is AEAD-bound to its routing and timing identity; the gateway verifies signature,
+replay, and expiry, then reveals the plaintext only under a typed capability and
+returns an audit-safe attestation that records who did what to which resource
+without exposing the payload.
+
+![DID/TypeDID agent-to-agent messaging](docs/book/diagrams/did-sequence.png)
+
 # Workspace Tour
 
 The repository is a Rust workspace with nine crates:

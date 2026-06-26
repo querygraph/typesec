@@ -14,6 +14,12 @@ by release version, then by the date the logical change landed.
   smallest end-to-end demo of the load-bearing loop (custom `PolicyEngine` →
   `mint_capability` → a function that demands a `Capability` → audit trail) using
   only `typesec-core`. All diagrams validated with `mmdc`.
+- Book/blog: added an **Architecture at a Glance** chapter to the book with the
+  five diagrams pre-rendered to PNG (`docs/book/diagrams/`) so they embed in the
+  EPUB/PDF/MOBI; rebuilt the artifacts. Restructured the announcement post to the
+  per-post layout `docs/blog/announcing-typesec/{post.md,diagrams/}`, added the
+  capability-flow and layering diagrams, and reflowed the prose to one line per
+  paragraph (Ulysses/Ghost-friendly) per the Grust `TEXTPACK.md` guide.
 
 ## 0.11.0 — Burano
 

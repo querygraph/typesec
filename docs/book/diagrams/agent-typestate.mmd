@@ -1,0 +1,10 @@
+stateDiagram-v2
+    [*] --> Unauthenticated
+    Unauthenticated --> Authenticated: authenticate_with
+    Authenticated --> Authenticated: request_capability
+    Authenticated --> Authenticated: execute
+    note right of Unauthenticated
+      request_capability and execute do not
+      exist on this state — calling them is
+      a compile error
+    end note
