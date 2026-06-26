@@ -45,6 +45,30 @@ impl DidOllamaClient {
         }
     }
 
+    /// The `/api/chat` endpoint for this client's base URL.
+    fn chat_endpoint(&self) -> String {
+        format!("{}/api/chat", self.base_url)
+    }
+
+    /// A non-streaming single-user-turn chat request body.
+    fn chat_body(&self, content: &str) -> Value {
+        json!({
+            "model": self.model,
+            "stream": false,
+            "messages": [{
+                "role": "user",
+                "content": content
+            }]
+        })
+    }
+
+    /// POST a chat request and map a transport failure to [`DidError::Http`].
+    fn post_chat(&self, body: &Value) -> Result<Value, DidError> {
+        self.http
+            .post_json(&self.chat_endpoint(), &[], body)
+            .map_err(DidError::Http)
+    }
+
     /// Reveal a verified prompt under typed authority and send it to Ollama.
     pub fn chat_verified_prompt(
         &self,
@@ -53,17 +77,7 @@ impl DidOllamaClient {
         read: &Capability<CanReadSensitive, GenericResource>,
     ) -> Result<Value, DidError> {
         let plaintext = prompt.prompt.reveal(read)?;
-        let body = json!({
-            "model": self.model,
-            "stream": false,
-            "messages": [{
-                "role": "user",
-                "content": plaintext
-            }]
-        });
-        self.http
-            .post_json(&format!("{}/api/chat", self.base_url), &[], &body)
-            .map_err(DidError::Http)
+        self.post_chat(&self.chat_body(&plaintext))
     }
 
     /// Send a verified prompt to Ollama and bind the assistant reply to it.
@@ -79,18 +93,7 @@ impl DidOllamaClient {
         let reply_to = prompt.subject.clone();
         let binding = DidReplyBinding::for_prompt(&prompt);
         let plaintext = prompt.prompt.reveal(read)?;
-        let body = json!({
-            "model": self.model,
-            "stream": false,
-            "messages": [{
-                "role": "user",
-                "content": plaintext
-            }]
-        });
-        let response = self
-            .http
-            .post_json(&format!("{}/api/chat", self.base_url), &[], &body)
-            .map_err(DidError::Http)?;
+        let response = self.post_chat(&self.chat_body(&plaintext))?;
         let reply = ollama_reply_content(&response)?;
         let reply_did = Did::key(sha256_tagged(
             b"typesec-did-ollama-reply",
@@ -108,9 +111,7 @@ impl DidOllamaClient {
             "stream": false,
             "did_envelope": envelope
         });
-        self.http
-            .post_json(&format!("{}/api/chat", self.base_url), &[], &body)
-            .map_err(DidError::Http)
+        self.post_chat(&body)
     }
 }
 

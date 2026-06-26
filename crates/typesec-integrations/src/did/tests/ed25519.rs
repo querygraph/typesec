@@ -255,3 +255,88 @@ fn ed25519_aead_rejects_wrong_associated_data() {
         Err(DidError::DecryptionFailed)
     ));
 }
+
+// ── Gateway guard branches (real Ed25519 crypto) ──────────────────────────
+// These exercise the expiry / recipient / future-dating / replay guards on the
+// production crypto path; previously only the demo store covered replay.
+
+fn ed25519_prompt() -> (Did, Did, StaticDidResolver, Ed25519DidKeyStore, DidEnvelope) {
+    let (alice, agent, resolver, keys) = ed25519_fixture();
+    let envelope = DidEnvelope::prompt(
+        "msg-ed-guard",
+        alice.clone(),
+        agent.clone(),
+        DidMessageBody::infer_prompt("prompt/session/ed"),
+        "guarded payload",
+        &resolver,
+        &keys,
+    )
+    .expect("envelope");
+    (alice, agent, resolver, keys, envelope)
+}
+
+#[test]
+fn ed25519_rejects_expired_envelope() {
+    let (_alice, agent, resolver, keys, mut envelope) = ed25519_prompt();
+    envelope.expires_time = 1; // 1970 — long past.
+    let gateway = DidMessageGateway::new(Arc::new(resolver), Arc::new(keys), agent);
+    assert!(matches!(
+        gateway.open_prompt(&envelope),
+        Err(DidError::Expired)
+    ));
+}
+
+#[test]
+fn ed25519_rejects_wrong_recipient() {
+    let (_alice, _agent, resolver, keys, envelope) = ed25519_prompt();
+    // A gateway whose recipient is a third party not in the envelope's `to`.
+    let eve = Did::key(Ed25519DidKey::from_seed(b"eve-ed25519").signing_public());
+    let gateway = DidMessageGateway::new(Arc::new(resolver), Arc::new(keys), eve);
+    assert!(matches!(
+        gateway.open_prompt(&envelope),
+        Err(DidError::WrongRecipient(_))
+    ));
+}
+
+#[test]
+fn ed25519_rejects_future_dated_envelope() {
+    let (_alice, agent, resolver, keys, mut envelope) = ed25519_prompt();
+    envelope.created_time = u64::MAX; // implausibly far in the future.
+    let gateway = DidMessageGateway::new(Arc::new(resolver), Arc::new(keys), agent);
+    assert!(matches!(
+        gateway.open_prompt(&envelope),
+        Err(DidError::NotYetValid { .. })
+    ));
+}
+
+#[test]
+fn ed25519_rejects_replayed_envelope() {
+    let (_alice, agent, resolver, keys, envelope) = ed25519_prompt();
+    let gateway = DidMessageGateway::new(Arc::new(resolver), Arc::new(keys), agent);
+    gateway.open_prompt(&envelope).expect("first open succeeds");
+    assert!(matches!(
+        gateway.open_prompt(&envelope),
+        Err(DidError::Replayed(_))
+    ));
+}
+
+#[test]
+fn ed25519_keystore_rotation_error_paths() {
+    let (alice, _agent, _resolver, mut keys) = ed25519_fixture();
+
+    // Retiring the active key version is rejected.
+    let active = keys.active_key_version(&alice).expect("active version");
+    assert!(matches!(
+        keys.retire_key(&alice, active),
+        Err(DidError::CannotRetireActiveKey { .. })
+    ));
+
+    // Retiring an unknown version is rejected. Rotate first so a non-active
+    // version exists, then ask for a version number that was never minted.
+    keys.rotate_key(&alice, Ed25519DidKey::from_seed(b"alice-ed25519-v2"))
+        .expect("rotate");
+    assert!(matches!(
+        keys.retire_key(&alice, 99),
+        Err(DidError::MissingKeyVersion { .. })
+    ));
+}

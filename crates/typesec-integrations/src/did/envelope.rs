@@ -128,21 +128,29 @@ pub struct DidEnvelope {
 }
 
 impl DidEnvelope {
-    /// Create an encrypted prompt envelope.
-    pub fn prompt(
-        id: impl Into<String>,
+    /// Resolve recipient/sender, encrypt, and sign one envelope.
+    ///
+    /// The single home for the prompt / reply / typedid construction path: it
+    /// resolves the recipient's key-agreement key and the sender's authentication
+    /// `kid`, builds the envelope with an empty ciphertext, computes the AEAD
+    /// associated data over its routing/timing identity, then encrypts and signs.
+    /// The four public constructors differ only in `id`, `message_type`, `body`,
+    /// and whether a `typedid` conversation is attached.
+    #[allow(clippy::too_many_arguments)]
+    fn seal(
+        id: String,
+        message_type: &str,
         from: Did,
         to: Did,
         body: DidMessageBody,
-        plaintext: impl AsRef<[u8]>,
+        typedid: Option<TypeDidConversation>,
+        plaintext: &[u8],
         resolver: &dyn DidResolver,
         key_store: &dyn DidKeyStore,
     ) -> Result<Self, DidError> {
-        let id = id.into();
         let now = unix_time();
         let recipient_document = resolver.resolve(&to)?;
-        let recipient_key = recipient_document.key_agreement_key()?;
-        let recipient_public = recipient_key.public_key()?;
+        let recipient_public = recipient_document.key_agreement_key()?.public_key()?;
         let sender_document = resolver.resolve(&from)?;
         let kid = sender_document
             .authentication
@@ -154,28 +162,46 @@ impl DidEnvelope {
         // routing/timing identity, then encrypt and sign.
         let mut envelope = Self {
             id,
-            message_type: "https://typesec.dev/did/message/v1/prompt".to_owned(),
+            message_type: message_type.to_owned(),
             from,
             to: vec![to],
             created_time: now,
             expires_time: now + 300,
             body,
-            typedid: None,
+            typedid,
             kid,
             nonce: hex_encode(&nonce),
             ciphertext: String::new(),
             signature: String::new(),
         };
         let aad = envelope.associated_data();
-        envelope.ciphertext = key_store.encrypt_for(
-            &envelope.from,
-            &recipient_public,
-            plaintext.as_ref(),
-            &nonce,
-            &aad,
-        )?;
+        envelope.ciphertext =
+            key_store.encrypt_for(&envelope.from, &recipient_public, plaintext, &nonce, &aad)?;
         envelope.signature = key_store.sign(&envelope.from, envelope.signing_input().as_bytes())?;
         Ok(envelope)
+    }
+
+    /// Create an encrypted prompt envelope.
+    pub fn prompt(
+        id: impl Into<String>,
+        from: Did,
+        to: Did,
+        body: DidMessageBody,
+        plaintext: impl AsRef<[u8]>,
+        resolver: &dyn DidResolver,
+        key_store: &dyn DidKeyStore,
+    ) -> Result<Self, DidError> {
+        Self::seal(
+            id.into(),
+            "https://typesec.dev/did/message/v1/prompt",
+            from,
+            to,
+            body,
+            None,
+            plaintext.as_ref(),
+            resolver,
+            key_store,
+        )
     }
 
     /// Create an encrypted reply envelope bound to a verified prompt envelope.
@@ -192,47 +218,22 @@ impl DidEnvelope {
             prompt_body,
             prompt_ref,
         } = binding;
-        let now = unix_time();
-        let recipient_document = resolver.resolve(&to)?;
-        let recipient_key = recipient_document.key_agreement_key()?;
-        let recipient_public = recipient_key.public_key()?;
-        let sender_document = resolver.resolve(&from)?;
-        let kid = sender_document
-            .authentication
-            .first()
-            .cloned()
-            .ok_or(DidError::MissingAuthentication)?;
-        let id = reply_did.to_string();
-        let nonce = random_nonce()?;
-        let mut envelope = Self {
-            id,
-            message_type: "https://typesec.dev/did/message/v1/reply".to_owned(),
+        Self::seal(
+            reply_did.to_string(),
+            "https://typesec.dev/did/message/v1/reply",
             from,
-            to: vec![to],
-            created_time: now,
-            expires_time: now + 300,
-            body: DidMessageBody {
+            to,
+            DidMessageBody {
                 action: prompt_body.action.clone(),
                 resource: prompt_body.resource.clone(),
                 privacy: prompt_body.privacy.clone(),
                 reply_to: Some(prompt_ref),
             },
-            typedid: None,
-            kid,
-            nonce: hex_encode(&nonce),
-            ciphertext: String::new(),
-            signature: String::new(),
-        };
-        let aad = envelope.associated_data();
-        envelope.ciphertext = key_store.encrypt_for(
-            &envelope.from,
-            &recipient_public,
+            None,
             plaintext.as_ref(),
-            &nonce,
-            &aad,
-        )?;
-        envelope.signature = key_store.sign(&envelope.from, envelope.signing_input().as_bytes())?;
-        Ok(envelope)
+            resolver,
+            key_store,
+        )
     }
 
     /// Create an encrypted TypeDID agent-message envelope.
@@ -247,11 +248,17 @@ impl DidEnvelope {
         resolver: &dyn DidResolver,
         key_store: &dyn DidKeyStore,
     ) -> Result<Self, DidError> {
-        let mut envelope = Self::prompt(id, from, to, body, plaintext, resolver, key_store)?;
-        envelope.message_type = "https://typesec.dev/did/message/v1/typedid".to_owned();
-        envelope.typedid = Some(typedid);
-        envelope.signature = key_store.sign(&envelope.from, envelope.signing_input().as_bytes())?;
-        Ok(envelope)
+        Self::seal(
+            id.into(),
+            "https://typesec.dev/did/message/v1/typedid",
+            from,
+            to,
+            body,
+            Some(typedid),
+            plaintext.as_ref(),
+            resolver,
+            key_store,
+        )
     }
 
     /// Create an encrypted TypeDID reply envelope bound to a verified request.
@@ -300,13 +307,12 @@ impl DidEnvelope {
     /// AEAD associated data binding the ciphertext to the envelope's
     /// routing/timing identity.
     ///
-    /// Includes only fields that are set before encryption and never mutated
-    /// afterward (`id`, `from`, `to`, `created_time`, `expires_time`) — notably
-    /// **not** `message_type` or `typedid`, which [`typedid`][Self::typedid]
-    /// rewrites after encrypting. Those are still authenticated by the signature
-    /// (see [`signing_input`][Self::signing_input]); the AAD adds a second,
-    /// AEAD-level binding so the ciphertext can't be lifted into a different
-    /// envelope even if the signature layer were bypassed.
+    /// Binds the envelope's routing/timing identity (`id`, `from`, `to`,
+    /// `created_time`, `expires_time`) — notably **not** `message_type` or
+    /// `typedid`. Those are still authenticated by the signature (see
+    /// [`signing_input`][Self::signing_input]); the AAD adds a second, AEAD-level
+    /// binding so the ciphertext can't be lifted into a different envelope even if
+    /// the signature layer were bypassed.
     pub(super) fn associated_data(&self) -> Vec<u8> {
         format!(
             "{}\n{}\n{}\n{}\n{}",

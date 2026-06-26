@@ -74,6 +74,17 @@ impl HttpClient for ReqwestHttpClient {
     }
 }
 
+/// Look up a preconfigured response for `url`, shared by the test doubles.
+fn canned_response(
+    responses: &HashMap<String, Value>,
+    url: &str,
+) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
+    responses
+        .get(url)
+        .cloned()
+        .ok_or_else(|| format!("no static response for {url}").into())
+}
+
 /// Test helper that returns preconfigured responses for exact URLs.
 #[derive(Default)]
 pub struct StaticHttpClient {
@@ -99,10 +110,7 @@ impl HttpClient for StaticHttpClient {
         url: &str,
         _headers: &[(&str, String)],
     ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
-        self.responses
-            .get(url)
-            .cloned()
-            .ok_or_else(|| format!("no static response for {url}").into())
+        canned_response(&self.responses, url)
     }
 
     fn post_json(
@@ -111,10 +119,7 @@ impl HttpClient for StaticHttpClient {
         _headers: &[(&str, String)],
         _body: &Value,
     ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
-        self.responses
-            .get(url)
-            .cloned()
-            .ok_or_else(|| format!("no static response for {url}").into())
+        canned_response(&self.responses, url)
     }
 }
 
@@ -187,10 +192,7 @@ impl HttpClient for RecordingHttpClient {
         headers: &[(&str, String)],
     ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
         self.record("GET", url, headers, None);
-        self.responses
-            .get(url)
-            .cloned()
-            .ok_or_else(|| format!("no static response for {url}").into())
+        canned_response(&self.responses, url)
     }
 
     fn post_json(
@@ -200,9 +202,6 @@ impl HttpClient for RecordingHttpClient {
         body: &Value,
     ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
         self.record("POST", url, headers, Some(body));
-        self.responses
-            .get(url)
-            .cloned()
-            .ok_or_else(|| format!("no static response for {url}").into())
+        canned_response(&self.responses, url)
     }
 }

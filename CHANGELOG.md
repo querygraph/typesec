@@ -23,6 +23,18 @@ files), so the work is DRY consolidation, test-gap filling, and small hardening.
   path, `mint_capability_with_async`, `Capability::is_fresh`, custom
   `RequestContext` values, `DelegationReason` display, and empty-token auth
   rejection.
+- **typesec-integrations:** DRY — the prompt / reply / typedid envelope
+  constructors now share one private `seal()` (resolve → encrypt → sign), the
+  Ollama client shares `chat_endpoint`/`chat_body`/`post_chat` helpers, and the
+  two HTTP test doubles share one `canned_response` lookup. Hardening — JWT
+  validation no longer seeds from the token's own `header.alg` (starts from a
+  default validator and installs only the config-permitted algorithms), and the
+  JWKS cache lock recovers from poisoning instead of panicking (matching the
+  gateway). Tests — added coverage for the gateway guard branches on the real
+  Ed25519 path (`Expired`, `WrongRecipient`, `NotYetValid`, replay), the
+  `PayloadTooLarge` negotiated-cap enforcement, WorkOS/Arcade
+  deny/delegate/transport/parse arms, the Ollama `MissingOllamaReply` path, and
+  the keystore rotation errors (`CannotRetireActiveKey`, `MissingKeyVersion`).
 
 ### 2026-06-26
 

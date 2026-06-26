@@ -74,6 +74,38 @@ fn typedid_adapter_wraps_and_gateway_opens_opaque_payload() {
 }
 
 #[test]
+fn typedid_wrap_enforces_negotiated_payload_cap() {
+    let (alice, agent, resolver, keys) = fixture();
+    // A negotiated profile with a tiny payload cap; the local profile's cap is
+    // what `wrap` enforces.
+    let mut small = TypeDidProfile::ed25519_x25519_chacha20();
+    small.max_payload_bytes = Some(8);
+    let profiles = vec![small];
+    let adapter = A2aTypeDidAdapter;
+
+    let result = adapter.wrap(
+        TypeDidWrapRequest {
+            id: "a2a-too-big".to_owned(),
+            from: alice,
+            to: agent,
+            conversation_id: "task/a2a-456".to_owned(),
+            mode: TypeDidMode::RequestReply,
+            body: DidMessageBody::agent_delegate("room/acme-support", "secret"),
+            payload: b"this payload is nine+ bytes",
+            local_profiles: &profiles,
+            remote_profiles: &profiles,
+        },
+        &resolver,
+        &keys,
+    );
+
+    assert!(matches!(
+        result,
+        Err(DidError::PayloadTooLarge { max: 8, .. })
+    ));
+}
+
+#[test]
 fn typedid_verified_message_exposes_audit_safe_attestation() {
     let (alice, agent, resolver, keys) = ed25519_fixture();
     let envelope = DidEnvelope::typedid(

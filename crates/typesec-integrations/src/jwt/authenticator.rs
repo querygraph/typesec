@@ -1,6 +1,6 @@
 //! JWT authenticator that verifies tokens against a JWKS endpoint.
 
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, PoisonError, RwLock};
 use std::time::Instant;
 
 use jsonwebtoken::{
@@ -55,7 +55,11 @@ impl JwtAuthenticator {
         let header = decode_header(token)?;
         let key = self.resolve_key(header.kid.as_deref())?;
 
-        let mut validation = Validation::new(header.alg);
+        // Never seed the validator from the token's own `header.alg` — that would
+        // be one edit away from trusting an attacker-chosen algorithm. Start from
+        // a default validator and install only the algorithms the trusted config
+        // permits; a token whose `header.alg` is outside that set is rejected.
+        let mut validation = Validation::default();
         validation.algorithms = self.config.algorithms.clone();
         validation.set_issuer(&[self.config.issuer.as_str()]);
         validation.set_audience(&[self.config.audience.as_str()]);
@@ -94,8 +98,15 @@ impl JwtAuthenticator {
     }
 
     fn jwks(&self, force_refresh: bool) -> Result<JwkSet, JwtAuthError> {
+        // The cached JWKS is not invariant-bearing, so recover the guard if a
+        // prior holder panicked rather than poisoning every future auth (matches
+        // the gateway's lock-recovery policy).
         if !force_refresh
-            && let Some(cached) = self.jwks.read().expect("jwks lock poisoned").as_ref()
+            && let Some(cached) = self
+                .jwks
+                .read()
+                .unwrap_or_else(PoisonError::into_inner)
+                .as_ref()
             && cached.fetched_at.elapsed() < self.config.jwks_ttl
         {
             return Ok(cached.keys.clone());
@@ -103,7 +114,7 @@ impl JwtAuthenticator {
 
         let value = self.http.get_json(&self.config.jwks_url, &[])?;
         let keys: JwkSet = serde_json::from_value(value)?;
-        *self.jwks.write().expect("jwks lock poisoned") = Some(CachedJwks {
+        *self.jwks.write().unwrap_or_else(PoisonError::into_inner) = Some(CachedJwks {
             keys: keys.clone(),
             fetched_at: Instant::now(),
         });
