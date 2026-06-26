@@ -323,6 +323,9 @@ internal path-dep constraints (they must match or cargo errors), move the
 (`docs/book/build.sh` reads the version from `Cargo.toml`), then tag `vX.Y.Z`
 and create a GitHub release titled with the codename.
 
+The full codename pool and release log live in `RELEASES.md`.
+
 | Version | Codename |
 |---|---|
 | 0.9.0 | Rialto (Ponte di Rialto) |
+| 0.10.0 | Murano (the glassmaking island) |

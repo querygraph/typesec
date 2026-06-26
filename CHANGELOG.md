@@ -5,6 +5,24 @@ by release version, then by the date the logical change landed.
 
 ## Unreleased
 
+## 0.10.0 — Murano
+
+### 2026-06-26
+
+Codename **Murano** — the second of the Venetian-landmark release line (after
+Rialto). This release tracks the Grust **0.11.0 (Crab)** dependency and bumps
+the workspace.
+
+- Bumped the Grust path dependencies (`grust-graph`, `grust-cypher`,
+  `grust-sail`) from `0.10.0` to `0.11.0` (Crab). The upgrade is source-
+  compatible: `cargo build --workspace` and `cargo test --workspace` are green
+  with no code changes to the typesec crates.
+- Bumped the workspace and all internal path-dependency constraints (and
+  `crates/typesec-python/pyproject.toml`) from `0.9.0` to `0.10.0`.
+- Added `RELEASES.md`: documents the `0.MINOR.0` versioning, the
+  Venetian-landmark codename pool, the per-release codename log, and the
+  release-cutting checklist.
+
 ## 0.9.0 — Rialto
 
 ### 2026-06-25

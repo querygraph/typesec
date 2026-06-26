@@ -234,9 +234,9 @@ build:
 
 ```toml
 # workspace Cargo.toml
-grust-graph  = { version = "0.10.0", path = "../grust/crates/grust", features = ["typed-zod-rs"] }
-grust-cypher = { version = "0.10.0", path = "../grust/crates/grust-cypher" }
-grust-sail   = { version = "0.10.0", path = "../grust/crates/grust-sail" }
+grust-graph  = { version = "0.11.0", path = "../grust/crates/grust", features = ["typed-zod-rs"] }
+grust-cypher = { version = "0.11.0", path = "../grust/crates/grust-cypher" }
+grust-sail   = { version = "0.11.0", path = "../grust/crates/grust-sail" }
 ```
 
 The package is named `grust-graph`, while its library is imported as `grust`.
@@ -1631,6 +1631,14 @@ that matches but fails a constraint now emits a `ConstraintFailed` event instead
 of vanishing, and every matched permission is recorded. The CLI `run` command
 now reflects its decision in the exit code, and a GitHub Actions pipeline runs
 formatting, clippy, tests, and a benchmark smoke step on every change.
+
+## Murano (0.10.0)
+
+The Murano release — the second Venetian landmark in the line — tracks the
+Grust **0.11.0 (Crab)** dependency. The upgrade is source-compatible: the
+workspace builds and the full test suite passes with no changes to the typesec
+crates, so Murano is a dependency-tracking and version-bump release. The
+codename pool and the release-cutting checklist now live in `RELEASES.md`.
 
 # Design Tradeoffs
 
