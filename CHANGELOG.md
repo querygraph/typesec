@@ -60,6 +60,16 @@ files), so the work is DRY consolidation, test-gap filling, and small hardening.
   rule/condition DSL. Tests: graph deny-overrides precedence (order-independent),
   schema-drift rejection at load, numeric `eq`/`neq`, and the ODRL duty-only
   no-op (delegates rather than silently allowing).
+- **typesec-agent / cli / macro / python.** CLI: extracted a pure
+  `code_for_result` (the exit-code contract) behind the process-terminating
+  `exit_for_result`, and added the crate's first tests (`detect_format`
+  precedence, the `Allow/Deny/Delegate → 0/1/2` contract, `request_context`).
+  Agent: added coverage for the expired-capability branch
+  (`TaskError::CapabilityExpired`) and the `AgentBuilder` (missing-engine error,
+  `with_engine`, composed-engine fallback). Macro: added `tests/role_derive.rs`
+  for `#[derive(TypesecRole)]` (name/permissions/resources and the
+  `pascal_to_snake` naming it shares with `policy!`). Python: collapsed the
+  four-arm `Decision` struct literal into one `Decision::new` constructor.
 
 ### 2026-06-26
 

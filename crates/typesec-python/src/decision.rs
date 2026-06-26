@@ -21,6 +21,26 @@ pub(crate) struct Decision {
     pub(crate) reason: Option<String>,
 }
 
+impl Decision {
+    /// Build a decision from its parts; the four `PolicyResult` arms differ only
+    /// in `allowed` and `reason`, so they share this one constructor.
+    fn new(
+        subject: &str,
+        action: &str,
+        resource: &str,
+        allowed: bool,
+        reason: Option<String>,
+    ) -> Self {
+        Self {
+            allowed,
+            subject: subject.to_string(),
+            action: action.to_string(),
+            resource: resource.to_string(),
+            reason,
+        }
+    }
+}
+
 #[pymethods]
 impl Decision {
     fn __repr__(&self) -> String {
@@ -61,37 +81,17 @@ pub(crate) fn decision_from_result(
     resource: &str,
     result: PolicyResult,
 ) -> Decision {
-    match result {
-        PolicyResult::Allow => Decision {
-            allowed: true,
-            subject: subject.to_string(),
-            action: action.to_string(),
-            resource: resource.to_string(),
-            reason: None,
-        },
-        PolicyResult::Deny(reason) => Decision {
-            allowed: false,
-            subject: subject.to_string(),
-            action: action.to_string(),
-            resource: resource.to_string(),
-            reason: Some(reason),
-        },
-        PolicyResult::Delegate(reason) => Decision {
-            allowed: false,
-            subject: subject.to_string(),
-            action: action.to_string(),
-            resource: resource.to_string(),
-            reason: Some(format!(
+    let (allowed, reason) = match result {
+        PolicyResult::Allow => (true, None),
+        PolicyResult::Deny(reason) => (false, Some(reason)),
+        PolicyResult::Delegate(reason) => (
+            false,
+            Some(format!(
                 "policy delegated to {}: {}",
                 reason.engine, reason.reason
             )),
-        },
-        _ => Decision {
-            allowed: false,
-            subject: subject.to_string(),
-            action: action.to_string(),
-            resource: resource.to_string(),
-            reason: Some("unknown policy result".to_string()),
-        },
-    }
+        ),
+        _ => (false, Some("unknown policy result".to_string())),
+    };
+    Decision::new(subject, action, resource, allowed, reason)
 }

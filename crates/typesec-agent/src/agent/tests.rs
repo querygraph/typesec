@@ -1,7 +1,9 @@
 use super::*;
 use std::sync::Arc;
+use std::time::Duration;
 use typesec_core::{
-    ResourceId, SubjectId, permissions::CanRead, policy::PolicyResult, resource::GenericResource,
+    ResourceId, SubjectId, permissions::CanRead, policy::MintOptions, policy::PolicyResult,
+    resource::GenericResource,
 };
 
 struct AllowAll;
@@ -90,6 +92,76 @@ async fn execute_rejects_capability_for_other_resource() {
         result,
         Err(crate::executor::TaskError::CapabilityMismatch(_))
     ));
+}
+
+#[tokio::test]
+async fn execute_rejects_expired_capability() {
+    let agent = SecureAgent::new(Arc::new(AllowAll))
+        .authenticate_unverified(Credentials::new("agent:test", "tok"))
+        .expect("auth ok");
+    let resource = GenericResource::new("reports/q1", "report");
+
+    // Mint a capability that is already expired (zero TTL).
+    let options = MintOptions {
+        ttl: Duration::ZERO,
+        ..MintOptions::default()
+    };
+    let cap: Capability<CanRead, GenericResource> = agent
+        .request_capability_with(&resource, options)
+        .await
+        .expect("cap ok");
+
+    let result = agent
+        .execute(&cap, &resource, |_r| Box::pin(async { Ok(()) }))
+        .await;
+    assert!(
+        matches!(result, Err(crate::executor::TaskError::CapabilityExpired(_))),
+        "an expired capability must not execute"
+    );
+}
+
+#[tokio::test]
+async fn builder_requires_engine_and_builds_with_one() {
+    assert!(
+        AgentBuilder::new().build().is_err(),
+        "building without an engine must fail"
+    );
+
+    let agent = AgentBuilder::new()
+        .with_engine(Arc::new(AllowAll))
+        .build()
+        .expect("build with engine")
+        .authenticate_unverified(Credentials::new("agent:test", "tok"))
+        .expect("auth ok");
+    let resource = GenericResource::new("reports/q1", "report");
+    let cap: Capability<CanRead, GenericResource> =
+        agent.request_capability(&resource).await.expect("cap ok");
+    assert_eq!(cap.subject(), "agent:test");
+}
+
+#[tokio::test]
+async fn builder_composed_engine_falls_back_to_secondary() {
+    // PriorityOrder: the primary's answer wins unless it delegates. A delegating
+    // primary therefore hands off to the AllowAll fallback.
+    struct DelegateAll;
+    impl PolicyEngine for DelegateAll {
+        fn check(&self, _: &SubjectId, _: &str, _: &ResourceId) -> PolicyResult {
+            PolicyResult::delegate("test", "abstain")
+        }
+    }
+
+    let agent = AgentBuilder::new()
+        .with_composed_engine(Arc::new(DelegateAll), Arc::new(AllowAll))
+        .build()
+        .expect("build")
+        .authenticate_unverified(Credentials::new("agent:test", "tok"))
+        .expect("auth ok");
+    let resource = GenericResource::new("reports/q1", "report");
+    let cap: Capability<CanRead, GenericResource> = agent
+        .request_capability(&resource)
+        .await
+        .expect("fallback should allow");
+    assert_eq!(cap.subject(), "agent:test");
 }
 
 #[tokio::test]

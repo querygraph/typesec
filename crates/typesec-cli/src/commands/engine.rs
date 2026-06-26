@@ -54,12 +54,23 @@ pub fn request_context(purpose: Option<&str>) -> RequestContext {
 
 /// Exit code reflecting a policy decision: 0 = allow, 1 = deny, 2 = delegate.
 ///
-/// Shared by `check` and `run` so both are safe to gate CI on.
-pub fn exit_for_result(result: &PolicyResult) -> ! {
+/// Pure so the exit-code contract is unit-testable; [`exit_for_result`] is the
+/// thin wrapper that actually terminates the process.
+pub fn code_for_result(result: &PolicyResult) -> i32 {
     match result {
-        PolicyResult::Allow => std::process::exit(0),
-        PolicyResult::Deny(_) => std::process::exit(1),
-        PolicyResult::Delegate(_) => std::process::exit(2),
-        _ => std::process::exit(1),
+        PolicyResult::Allow => 0,
+        PolicyResult::Deny(_) => 1,
+        PolicyResult::Delegate(_) => 2,
+        _ => 1,
     }
 }
+
+/// Exit reflecting a policy decision: 0 = allow, 1 = deny, 2 = delegate.
+///
+/// Shared by `check` and `run` so both are safe to gate CI on.
+pub fn exit_for_result(result: &PolicyResult) -> ! {
+    std::process::exit(code_for_result(result))
+}
+
+#[cfg(test)]
+mod tests;
