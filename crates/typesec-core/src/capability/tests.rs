@@ -135,3 +135,31 @@ fn new_capability_is_active() {
     assert!(!cap.is_expired());
     cap.ensure_active().expect("new capability is active");
 }
+
+#[test]
+fn is_fresh_bounds_the_toctou_window() {
+    let cap: Capability<CanRead, TestResource> = Capability::new_minted(
+        "agent:test",
+        "test://resource",
+        SystemTime::now(),
+        DEFAULT_CAPABILITY_TTL,
+        None,
+        None,
+    );
+
+    // Freshly minted: within a generous window, but never within a zero window.
+    assert!(cap.is_fresh(Duration::from_secs(60)));
+    assert!(!cap.is_fresh(Duration::ZERO));
+
+    // A capability issued in the past is not fresh against a tight window.
+    let stale: Capability<CanRead, TestResource> = Capability::new_minted(
+        "agent:test",
+        "test://resource",
+        SystemTime::now() - Duration::from_secs(120),
+        DEFAULT_CAPABILITY_TTL,
+        None,
+        None,
+    );
+    assert!(!stale.is_fresh(Duration::from_secs(60)));
+    assert!(stale.is_fresh(Duration::from_secs(600)));
+}

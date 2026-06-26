@@ -62,18 +62,19 @@ pub use permissions::{
     CanRead, CanReadInternal, CanReadSensitive, CanWrite, CanWriteSensitive, Permission,
 };
 pub use policy::{
-    AsyncPolicyEngine, AuditEvent, AuditFuture, AuditSink, AuditTimestamp, DelegationReason,
-    FallbackEngine, MintOptions, PolicyEngine, PolicyFuture, PolicyResult, RequestContext,
-    SubjectId, TracingAuditSink, format_audit_timestamp, mint_capability, mint_capability_async,
-    mint_capability_for_id, mint_capability_for_id_async, mint_capability_with,
-    mint_capability_with_async, set_audit_sink,
+    AsyncPolicyEngine, AuditEvent, AuditFuture, AuditSink, AuditTimestamp, CapabilityError,
+    DelegationReason, FallbackEngine, MintOptions, PolicyEngine, PolicyFuture, PolicyResult,
+    RequestContext, SubjectId, TracingAuditSink, format_audit_timestamp, mint_capability,
+    mint_capability_async, mint_capability_for_id, mint_capability_for_id_async,
+    mint_capability_with, mint_capability_with_async, set_audit_sink,
 };
-pub use resource::{Resource, ResourceId};
+pub use resource::{GenericResource, Resource, ResourceId};
 pub use role::Role;
 pub use secure_value::{
     Internal, Join, PrivacyLevel, Public, Secret, SecureAccessError, SecureValue, SecureValueError,
     Sensitive,
 };
 pub use typestate::{
-    Agent, AgentState, Authenticated, Authenticator, Credentials, Token, Unauthenticated,
+    Agent, AgentError, AgentState, Authenticated, Authenticator, Credentials, Token,
+    Unauthenticated,
 };

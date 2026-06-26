@@ -47,6 +47,16 @@ fn empty_subject_fails_auth() {
     ));
 }
 
+#[test]
+fn empty_token_fails_auth() {
+    let agent = Agent::<Unauthenticated>::new(Arc::new(AllowAll));
+    let creds = Credentials::new("agent:test", "");
+    assert!(matches!(
+        agent.authenticate_unverified(creds),
+        Err(AgentError::AuthFailed { .. })
+    ));
+}
+
 struct FixedSubject(&'static str);
 impl Authenticator for FixedSubject {
     fn verify_credentials(&self, credentials: &Credentials) -> Result<String, AgentError> {

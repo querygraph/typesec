@@ -187,3 +187,46 @@ fn deny_overrides_all_delegate_returns_delegate() {
         PolicyResult::Delegate(_)
     ));
 }
+
+// ── Async driver ──────────────────────────────────────────────────────────
+// The design claim is that the sync and async paths fold through one `Verdicts`
+// so they cannot diverge. These drive the async path so that is actually
+// covered, not merely asserted.
+
+fn check_async(e: &ComposedEngine) -> PolicyResult {
+    futures::executor::block_on(e.check_with_context_async(
+        &subject(),
+        "a",
+        &resource(),
+        &RequestContext::default(),
+    ))
+}
+
+#[test]
+fn async_deny_overrides_matches_sync() {
+    let e = PolicyEngineBuilder::new()
+        .add_engine(allow())
+        .add_engine(deny("prohibited"))
+        .strategy(CombineStrategy::DenyOverrides)
+        .build();
+    assert!(matches!(check_async(&e), PolicyResult::Deny(_)));
+}
+
+#[test]
+fn async_priority_skips_delegate() {
+    let e = PolicyEngineBuilder::new()
+        .add_engine(delegate())
+        .add_engine(allow())
+        .strategy(CombineStrategy::PriorityOrder)
+        .build();
+    assert_eq!(check_async(&e), PolicyResult::Allow);
+}
+
+#[test]
+fn async_all_delegate_returns_delegate() {
+    let e = PolicyEngineBuilder::new()
+        .add_engine(delegate())
+        .strategy(CombineStrategy::DenyOverrides)
+        .build();
+    assert!(matches!(check_async(&e), PolicyResult::Delegate(_)));
+}

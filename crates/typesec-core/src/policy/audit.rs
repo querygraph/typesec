@@ -1,6 +1,6 @@
 //! The audit trail: structured records of every policy decision.
 
-use std::sync::{Arc, OnceLock, RwLock};
+use std::sync::{Arc, OnceLock, PoisonError, RwLock};
 
 use chrono::{DateTime, SecondsFormat, Utc};
 use tracing::{info, warn};
@@ -106,34 +106,38 @@ fn audit_sink_cell() -> &'static RwLock<Arc<dyn AuditSink>> {
     SINK.get_or_init(|| RwLock::new(Arc::new(TracingAuditSink)))
 }
 
+/// Recover a lock guard whether or not the lock was poisoned.
+///
+/// The audit sink behind the lock is not invariant-bearing — a panic while it
+/// was held doesn't corrupt it — so recovering the inner guard is safe and
+/// keeps a single poisoned mint from wedging all future auditing. Shared by the
+/// three lock sites below so the recovery policy lives in one place.
+fn recover<T>(result: Result<T, PoisonError<T>>) -> T {
+    result.unwrap_or_else(|poisoned| {
+        warn!("audit sink lock was poisoned; recovering inner sink");
+        poisoned.into_inner()
+    })
+}
+
 /// Install a process-wide audit sink, replacing the previous one.
 ///
 /// All subsequent [`mint_capability`][crate::mint_capability] decisions are
 /// recorded through `sink`.
 pub fn set_audit_sink(sink: Arc<dyn AuditSink>) {
-    let mut guard = audit_sink_cell().write().unwrap_or_else(|poisoned| {
-        warn!("audit sink lock was poisoned; recovering inner sink");
-        poisoned.into_inner()
-    });
+    let mut guard = recover(audit_sink_cell().write());
     *guard = sink;
 }
 
 /// Record an event through the configured audit sink.
 pub(crate) fn record_audit(event: &AuditEvent) {
-    let guard = audit_sink_cell().read().unwrap_or_else(|poisoned| {
-        warn!("audit sink lock was poisoned; recovering inner sink");
-        poisoned.into_inner()
-    });
+    let guard = recover(audit_sink_cell().read());
     guard.record(event);
 }
 
 /// Record an event asynchronously through the configured audit sink.
 pub(crate) async fn record_audit_async(event: &AuditEvent) {
     let sink = {
-        let guard = audit_sink_cell().read().unwrap_or_else(|poisoned| {
-            warn!("audit sink lock was poisoned; recovering inner sink");
-            poisoned.into_inner()
-        });
+        let guard = recover(audit_sink_cell().read());
         Arc::clone(&guard)
     };
     sink.record_async(event).await;

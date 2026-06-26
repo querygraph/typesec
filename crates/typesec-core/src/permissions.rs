@@ -152,14 +152,4 @@ impl_permission! {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn permission_names_are_correct() {
-        assert_eq!(CanRead::name(), "read");
-        assert_eq!(CanReadInternal::name(), "read_internal");
-        assert_eq!(CanWrite::name(), "write");
-        assert_eq!(AiCanExfiltrate::name(), "ai:exfiltrate");
-    }
-}
+mod tests;

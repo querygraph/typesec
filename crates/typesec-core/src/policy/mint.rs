@@ -139,14 +139,7 @@ pub fn mint_capability_for_id<P: Permission, R: Resource>(
     let result = engine.check_with_context(&subject, action, &resource_id, &options.context);
 
     // Emit the structured audit event for every decision, allow or deny.
-    let event = AuditEvent {
-        subject: subject.clone(),
-        action: action.to_owned(),
-        resource: resource_id.clone(),
-        result: result.clone(),
-        timestamp: now_utc(),
-    };
-    record_audit(&event);
+    record_audit(&audit_event(&subject, action, &resource_id, &result));
 
     finish_mint(result, subject, resource_id, options)
 }
@@ -167,16 +160,28 @@ pub async fn mint_capability_for_id_async<P: Permission, R: Resource>(
         .check_with_context_async(&subject, action, &resource_id, &options.context)
         .await;
 
-    let event = AuditEvent {
-        subject: subject.clone(),
-        action: action.to_owned(),
-        resource: resource_id.clone(),
-        result: result.clone(),
-        timestamp: now_utc(),
-    };
-    record_audit_async(&event).await;
+    record_audit_async(&audit_event(&subject, action, &resource_id, &result)).await;
 
     finish_mint(result, subject, resource_id, options)
+}
+
+/// Build the structured [`AuditEvent`] for a decision.
+///
+/// Shared by the sync and async mint paths so the two cannot drift in which
+/// fields they record (the "twin bodies that silently diverge" hazard).
+fn audit_event(
+    subject: &SubjectId,
+    action: &str,
+    resource: &ResourceId,
+    result: &PolicyResult,
+) -> AuditEvent {
+    AuditEvent {
+        subject: subject.clone(),
+        action: action.to_owned(),
+        resource: resource.clone(),
+        result: result.clone(),
+        timestamp: now_utc(),
+    }
 }
 
 /// Turn an audited policy verdict into a minted capability or a typed error.

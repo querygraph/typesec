@@ -240,3 +240,103 @@ fn composed_engine_falls_back() {
     );
     assert_eq!(result, PolicyResult::Allow);
 }
+
+struct DelegateAlways;
+impl PolicyEngine for DelegateAlways {
+    fn check(&self, _: &SubjectId, _: &str, _: &ResourceId) -> PolicyResult {
+        PolicyResult::delegate("test", "abstain")
+    }
+}
+
+#[test]
+fn composed_engine_falls_back_on_async_path() {
+    // Mirror of `composed_engine_falls_back` through the async driver so the two
+    // fallback paths cannot diverge.
+    let engine = DelegateAlways.with_fallback(Arc::new(AllowAll));
+    let result = futures::executor::block_on(PolicyEngine::check_with_context_async(
+        &engine,
+        &SubjectId::from("agent:x"),
+        "read",
+        &ResourceId::from("reports/q1"),
+        &RequestContext::default(),
+    ));
+    assert_eq!(result, PolicyResult::Allow);
+}
+
+#[test]
+fn delegate_without_fallback_is_unhandled_delegation() {
+    let resource = GenericResource::new("reports/q1", "report");
+    let result: Result<Capability<CanRead, GenericResource>, _> =
+        mint_capability(&DelegateAlways, "agent:test", &resource);
+    assert!(matches!(result, Err(CapabilityError::UnhandledDelegation)));
+}
+
+#[test]
+fn mint_capability_with_async_honors_short_ttl() {
+    let resource = GenericResource::new("reports/q1", "report");
+    let options = MintOptions {
+        ttl: Duration::ZERO,
+        ..MintOptions::default()
+    };
+    let cap: Capability<CanRead, GenericResource> = futures::executor::block_on(
+        mint_capability_with_async(&AllowAll, "agent:test", &resource, &options),
+    )
+    .expect("allow");
+    assert!(cap.is_expired());
+}
+
+#[test]
+fn mint_with_custom_context_reaches_engine() {
+    struct TenantEngine;
+    impl PolicyEngine for TenantEngine {
+        fn check(&self, _: &SubjectId, _: &str, _: &ResourceId) -> PolicyResult {
+            PolicyResult::Deny("no context".into())
+        }
+
+        fn check_with_context(
+            &self,
+            _: &SubjectId,
+            _: &str,
+            _: &ResourceId,
+            ctx: &RequestContext,
+        ) -> PolicyResult {
+            if ctx.custom.get("tenant").map(String::as_str) == Some("acme") {
+                PolicyResult::Allow
+            } else {
+                PolicyResult::Deny("wrong tenant".into())
+            }
+        }
+    }
+
+    let resource = GenericResource::new("reports/q1", "report");
+    let options = MintOptions {
+        context: RequestContext::new().with("tenant", "acme"),
+        ..MintOptions::default()
+    };
+    let cap: Capability<CanRead, GenericResource> =
+        mint_capability_with(&TenantEngine, "agent:test", &resource, &options)
+            .expect("custom context should allow");
+    assert_eq!(cap.resource_id(), "reports/q1");
+}
+
+#[test]
+fn engine_error_string_form_renders_message() {
+    let err = CapabilityError::engine_error("join failed");
+    assert!(err.source().is_some());
+    assert_eq!(
+        err.source().map(ToString::to_string).as_deref(),
+        Some("join failed")
+    );
+}
+
+#[test]
+fn delegation_reason_display_with_and_without_context() {
+    let plain = DelegationReason::new("rbac", "no matching role");
+    assert_eq!(plain.to_string(), "rbac: no matching role");
+
+    let with_ctx = DelegationReason::new("rbac", "no matching role").with_context("tried 3 roles");
+    assert_eq!(
+        with_ctx.to_string(),
+        "rbac: no matching role (tried 3 roles)"
+    );
+}

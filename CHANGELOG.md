@@ -5,6 +5,25 @@ by release version, then by the date the logical change landed.
 
 ## Unreleased
 
+### 2026-06-26 — review follow-ups
+
+Workspace-wide quality/DRY/test-coverage review (five-area pass). Changes land as
+focused commits; structure was already sound (no monoliths; tests in sibling
+files), so the work is DRY consolidation, test-gap filling, and small hardening.
+
+- **typesec-core:** re-exported `CapabilityError` and `AgentError` at the crate
+  root (every public `mint_capability*` / `authenticate_*` fn can now have its
+  error named by callers) plus `GenericResource`. Extracted the last inline test
+  module (`permissions.rs`) into a sibling `permissions/tests.rs`. DRY: the
+  sync/async mint paths now share one `audit_event` builder so they can't drift
+  in which fields they record, and the three poisoned-audit-lock recovery sites
+  collapse to one `recover` helper. Added the previously-missing tests for the
+  async `ComposedEngine` and `FallbackEngine` drivers (the "sync/async fold can't
+  diverge" guarantee was asserted but untested), the `UnhandledDelegation` mint
+  path, `mint_capability_with_async`, `Capability::is_fresh`, custom
+  `RequestContext` values, `DelegationReason` display, and empty-token auth
+  rejection.
+
 ### 2026-06-26
 
 - Docs: corrected the stale "Grust is a local path dependency, not on crates.io"
