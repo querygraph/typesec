@@ -6,7 +6,10 @@ use typesec_core::Role;
 use typesec_macro::TypesecRole;
 
 #[derive(TypesecRole)]
-#[role(permissions = "read, read_sensitive", resources = "reports/*, metrics/*")]
+#[role(
+    permissions = "read, read_sensitive",
+    resources = "reports/*, metrics/*"
+)]
 struct AnalystReadOnly;
 
 #[derive(TypesecRole)]

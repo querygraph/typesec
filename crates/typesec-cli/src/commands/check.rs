@@ -4,10 +4,7 @@ use anyhow::Result;
 use clap::Args;
 use serde::Serialize;
 use std::path::PathBuf;
-use typesec_core::{
-    ResourceId, SubjectId,
-    policy::PolicyResult,
-};
+use typesec_core::{ResourceId, SubjectId, policy::PolicyResult};
 
 use super::engine::{detect_format, exit_for_result, load_engine, request_context};
 

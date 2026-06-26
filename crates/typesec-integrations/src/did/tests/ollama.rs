@@ -90,8 +90,8 @@ fn did_ollama_bound_reply_requires_assistant_content() {
     .expect("read cap");
 
     // Ollama answers with no `message.content` field.
-    let http = RecordingHttpClient::new()
-        .with_response("http://localhost:11434/api/chat", json!({}));
+    let http =
+        RecordingHttpClient::new().with_response("http://localhost:11434/api/chat", json!({}));
     let client = DidOllamaClient::with_http("http://localhost:11434", "llama3.2", Arc::new(http));
 
     let result =

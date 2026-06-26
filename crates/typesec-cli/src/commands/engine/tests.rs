@@ -38,14 +38,14 @@ fn detect_format_graph_outranks_rbac_and_odrl() {
 fn exit_codes_follow_the_verdict() {
     assert_eq!(code_for_result(&PolicyResult::Allow), 0);
     assert_eq!(code_for_result(&PolicyResult::Deny("no".into())), 1);
-    assert_eq!(
-        code_for_result(&PolicyResult::delegate("e", "abstain")),
-        2
-    );
+    assert_eq!(code_for_result(&PolicyResult::delegate("e", "abstain")), 2);
 }
 
 #[test]
 fn request_context_carries_purpose() {
-    assert_eq!(request_context(Some("analytics")).purpose.as_deref(), Some("analytics"));
+    assert_eq!(
+        request_context(Some("analytics")).purpose.as_deref(),
+        Some("analytics")
+    );
     assert_eq!(request_context(None).purpose, None);
 }

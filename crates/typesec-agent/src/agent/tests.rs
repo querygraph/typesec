@@ -115,7 +115,10 @@ async fn execute_rejects_expired_capability() {
         .execute(&cap, &resource, |_r| Box::pin(async { Ok(()) }))
         .await;
     assert!(
-        matches!(result, Err(crate::executor::TaskError::CapabilityExpired(_))),
+        matches!(
+            result,
+            Err(crate::executor::TaskError::CapabilityExpired(_))
+        ),
         "an expired capability must not execute"
     );
 }
