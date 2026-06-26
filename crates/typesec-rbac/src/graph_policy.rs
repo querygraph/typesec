@@ -1,7 +1,5 @@
 //! Graph-aware policy definitions backed by Grust graphs.
 
-#![allow(missing_docs)]
-
 mod authored;
 mod engine;
 mod eval;

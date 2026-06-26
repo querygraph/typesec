@@ -229,3 +229,73 @@ fn graph_policy_rejects_invalid_edge_endpoint_types() {
     let err = GraphPolicyDocument::from_yaml(&yaml).expect_err("endpoint type should fail");
     assert!(err.contains("HAS_ROLE edge from node 'employee:nia' must have label 'Agent'"));
 }
+
+const DENY_OVERRIDE_GRAPH: &str = r#"
+graph_policy:
+  graph:
+    nodes:
+      - id: agent:a
+        label: Agent
+      - id: role:writer
+        label: Role
+    edges:
+      - label: HAS_ROLE
+        from: agent:a
+        to: role:writer
+  rules:
+    - subject_has_role: role:writer
+      action: write
+      resource: doc/*
+      effect: allow
+    - subject_has_role: role:writer
+      action: write
+      resource: doc/*
+      effect: deny
+"#;
+
+#[test]
+fn deny_rule_overrides_matching_allow_regardless_of_order() {
+    // Both an allow and a deny rule match the same (subject, action, resource);
+    // deny must win. Then prove it's order-independent by swapping the rules.
+    let engine = GraphPolicyEngine::from_yaml(DENY_OVERRIDE_GRAPH).expect("load");
+    assert!(matches!(
+        engine.check(
+            &SubjectId::from("agent:a"),
+            "write",
+            &ResourceId::from("doc/readme")
+        ),
+        PolicyResult::Deny(_)
+    ));
+
+    let swapped = DENY_OVERRIDE_GRAPH
+        .replace("effect: allow", "effect: TEMP")
+        .replace("effect: deny", "effect: allow")
+        .replace("effect: TEMP", "effect: deny");
+    let engine = GraphPolicyEngine::from_yaml(&swapped).expect("load swapped");
+    assert!(
+        matches!(
+            engine.check(
+                &SubjectId::from("agent:a"),
+                "write",
+                &ResourceId::from("doc/readme")
+            ),
+            PolicyResult::Deny(_)
+        ),
+        "deny must override allow even when the allow rule is listed last"
+    );
+}
+
+#[test]
+fn load_rejects_graph_that_violates_company_schema() {
+    // A REPORTS_TO edge between two Agents (not Employees) passes the typed-graph
+    // build's per-edge endpoint check only if mislabeled; here we point it at a
+    // Role to trip grust's schema cross-check wired into validate().
+    let yaml = YAML.replace(
+        "      - label: REPORTS_TO\n        from: employee:marco\n        to: employee:evelyn",
+        "      - label: REPORTS_TO\n        from: role:hr_graph_writer\n        to: employee:evelyn",
+    );
+    assert!(
+        GraphPolicyDocument::from_yaml(&yaml).is_err(),
+        "a schema-violating endpoint label must be rejected at load"
+    );
+}

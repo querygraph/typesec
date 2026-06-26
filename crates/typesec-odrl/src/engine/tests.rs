@@ -204,3 +204,27 @@ policies:
     let result = e.check_with_context("agent:summarizer", "read", "customer-data", &ctx);
     assert!(matches!(result, PolicyResult::Deny(_)));
 }
+
+#[test]
+fn duty_only_match_is_a_documented_no_op() {
+    // A duty rule is parsed and indexed but not evaluated as a grant, so a
+    // request whose only matching rule is a duty yields no permission and
+    // delegates (rather than silently allowing).
+    let yaml = r#"
+policies:
+  - uid: "policy:duty"
+    type: Set
+    rules:
+      - type: duty
+        assignee: "agent:x"
+        action: read
+        target: "asset:doc"
+"#;
+    let e = OdrlEngine::from_yaml(yaml).expect("engine build ok");
+    let ctx = ConstraintContext::default();
+    let result = e.check_with_context("agent:x", "read", "doc", &ctx);
+    assert!(
+        matches!(result, PolicyResult::Delegate(_)),
+        "a duty-only match must not allow; it has no permission semantics"
+    );
+}

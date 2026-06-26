@@ -3,6 +3,9 @@
 use grust::prelude::{Field, FieldType, GraphSchema, GraphStore, Label};
 use grust_cypher::{CypherConstraintRegistry, CypherSchemaApplication, apply_cypher_ddl_to_schema};
 
+/// The declarative company graph schema (Agent/Role/Employee nodes and their
+/// `HAS_ROLE`/`REPORTS_TO` edges) used to type-check policy graphs and to derive
+/// the Cypher DDL constraints.
 pub fn company_graph_schema() -> GraphSchema {
     GraphSchema::builder()
         .node("Agent", vec![Field::required("id", FieldType::String)])
@@ -36,6 +39,7 @@ pub fn company_graph_schema() -> GraphSchema {
         .build()
 }
 
+/// Cypher DDL that mirrors the company schema's uniqueness/required constraints.
 pub const COMPANY_GRAPH_CYPHER_CONSTRAINTS: &str = r#"
 CREATE CONSTRAINT agent_id IF NOT EXISTS FOR (n:Agent) REQUIRE n.id IS UNIQUE;
 CREATE CONSTRAINT role_id IF NOT EXISTS FOR (n:Role) REQUIRE n.id IS UNIQUE;
@@ -43,10 +47,12 @@ CREATE CONSTRAINT employee_id IF NOT EXISTS FOR (n:Employee) REQUIRE n.id IS UNI
 CREATE CONSTRAINT employee_name_required IF NOT EXISTS FOR (n:Employee) REQUIRE n.name IS NOT NULL;
 "#;
 
+/// The Cypher DDL constraint script for the company schema.
 pub fn company_graph_cypher_constraints() -> &'static str {
     COMPANY_GRAPH_CYPHER_CONSTRAINTS
 }
 
+/// Apply the company-schema Cypher DDL constraints to a graph store.
 pub async fn apply_company_graph_cypher_constraints<S>(
     store: &S,
 ) -> grust::Result<CypherSchemaApplication>

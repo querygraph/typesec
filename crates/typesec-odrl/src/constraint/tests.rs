@@ -71,6 +71,24 @@ fn count_ordering_is_numeric_not_lexicographic() {
 }
 
 #[test]
+fn equality_is_numeric_when_both_sides_parse() {
+    // "5.0" == "5" numerically, but not as strings.
+    let c = make_constraint("count", ConstraintOperator::Eq, "5");
+    let ctx = ConstraintContext::default().with("count", "5.0");
+    assert!(evaluate(&c, &ctx), "count 5.0 must satisfy `eq 5`");
+
+    // Neq is the numeric complement.
+    let c = make_constraint("count", ConstraintOperator::Neq, "5");
+    let ctx = ConstraintContext::default().with("count", "5.0");
+    assert!(!evaluate(&c, &ctx), "count 5.0 must not satisfy `neq 5`");
+
+    // Non-numeric operands still compare as strings.
+    let c = make_constraint("region", ConstraintOperator::Eq, "eu");
+    let ctx = ConstraintContext::default().with("region", "us");
+    assert!(!evaluate(&c, &ctx));
+}
+
+#[test]
 fn non_numeric_ordering_falls_back_to_lexicographic() {
     let c = make_constraint("tier", ConstraintOperator::Lt, "gold");
     let ctx = ConstraintContext::default().with("tier", "bronze");

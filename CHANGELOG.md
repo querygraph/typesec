@@ -47,6 +47,19 @@ files), so the work is DRY consolidation, test-gap filling, and small hardening.
   the safer authorization default and the semantics the RBAC docs already claimed
   but never enforced (previously untested). Added glob edge-case tests in core
   and at the RBAC integration level.
+- **typesec-rbac / typesec-odrl correctness + Grust 0.11 adoption.** The graph
+  policy engine's `validate()` now cross-checks the built graph against the
+  declarative `company_graph_schema()` via grust 0.11's
+  `GraphSchema::validate_graph` (declared labels, required/typed properties, edge
+  endpoint labels, uniqueness) — tying the schema to the load path so the two
+  can't silently drift — and validates rule resource patterns through the shared
+  `GlobPattern` instead of a raw `Pattern::new`. ODRL equality (`eq`/`neq`) now
+  compares numerically when both operands parse as numbers (consistent with the
+  ordering operators), so `count eq 5` holds for `"5.0"`. Removed the blanket
+  `#![allow(missing_docs)]` on the graph-policy module and documented its public
+  rule/condition DSL. Tests: graph deny-overrides precedence (order-independent),
+  schema-drift rejection at load, numeric `eq`/`neq`, and the ODRL duty-only
+  no-op (delegates rather than silently allowing).
 
 ### 2026-06-26
 

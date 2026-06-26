@@ -124,8 +124,17 @@ fn evaluate_datetime(constraint: &OdrlConstraint, ctx: &ConstraintContext) -> bo
 
 fn evaluate_string_op(op: &ConstraintOperator, actual: &str, expected: &str) -> bool {
     match op {
-        ConstraintOperator::Eq => actual == expected,
-        ConstraintOperator::Neq => actual != expected,
+        // Equality compares numerically when *both* sides parse as numbers, so
+        // `count eq 5` holds for an actual of `"5.0"` or `"05"` — consistent with
+        // the ordering operators below. Non-numeric operands compare as strings.
+        ConstraintOperator::Eq => match (actual.parse::<f64>(), expected.parse::<f64>()) {
+            (Ok(a), Ok(b)) => a == b,
+            _ => actual == expected,
+        },
+        ConstraintOperator::Neq => match (actual.parse::<f64>(), expected.parse::<f64>()) {
+            (Ok(a), Ok(b)) => a != b,
+            _ => actual != expected,
+        },
         ConstraintOperator::IsPartOf => expected.split(',').any(|v| v.trim() == actual),
         // Ordering operators compare numerically when *both* sides parse as
         // numbers — so `count lteq 5` is arithmetic (10 is not <= 5), not
