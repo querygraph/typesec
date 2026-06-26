@@ -1,6 +1,6 @@
 # Announcing Typesec: authority you can't forget at the call site
 
-*June 2026 — Typesec 0.10.0 "Murano"*
+*June 2026 — Typesec 0.11.0 "Burano"*
 
 Most authorization systems answer a question — *is this allowed?* — and then trust
 every line of code after the check to remember the answer. The check and the
@@ -59,7 +59,7 @@ a Grust graph, deny-overrides resolution decides the verdict, and `grust-cypher`
 can apply Cypher DDL constraints or run an *authorized* Cypher mutation through
 the same graph-store boundary. The result is graph-shaped authorization — roles,
 resources, and relationships as a typed graph — with the same unforgeable
-capability at the end of it. (Typesec 0.10.0 tracks Grust 0.11.0, "Crab.")
+capability at the end of it. (Typesec 0.11.0 tracks Grust 0.11.0, "Crab.")
 
 ## Typesec in lakecat
 
@@ -74,11 +74,11 @@ or the signing material.
 
 ## Try it
 
-Typesec 0.10.0 is published on crates.io:
+Typesec 0.11.0 is published on crates.io:
 
 ```toml
 [dependencies]
-typesec = { version = "0.10.0", features = ["integrations"] }
+typesec = { version = "0.11.0", features = ["integrations"] }
 ```
 
 - **The book** — the full design narrative, worked examples, and design
