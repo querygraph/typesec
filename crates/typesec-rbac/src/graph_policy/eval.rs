@@ -6,8 +6,8 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use glob::Pattern;
 use grust::prelude::{Direction, Graph, Label, Node, NodeId};
+use typesec_core::glob::GlobPattern;
 
 use super::rule::{
     GraphConditions, GraphRule, PathCondition, PathDirection, RelationshipCondition, Scalar,
@@ -255,5 +255,5 @@ fn expand_subject(value: &str, subject: &str) -> String {
 }
 
 fn matches_glob(pattern: &str, resource: &str) -> bool {
-    pattern == "*" || Pattern::new(pattern).is_ok_and(|p| p.matches(resource))
+    GlobPattern::compile(pattern, "resource").is_ok_and(|p| p.matches(resource))
 }

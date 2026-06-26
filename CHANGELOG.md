@@ -35,6 +35,18 @@ files), so the work is DRY consolidation, test-gap filling, and small hardening.
   `PayloadTooLarge` negotiated-cap enforcement, WorkOS/Arcade
   deny/delegate/transport/parse arms, the Ollama `MissingOllamaReply` path, and
   the keystore rotation errors (`CannotRetireActiveKey`, `MissingKeyVersion`).
+- **Glob matching unified into `typesec-core::glob::GlobPattern`.** RBAC's
+  subject/resource matcher (the previously-internal `GlobPattern`), the graph
+  engine's `matches_glob`, and ODRL's per-check `target_matches` were three
+  separate implementations with divergent `*` semantics; they now share one
+  compiled type. ODRL compiles each rule's target **once at load** (was: a fresh
+  `Pattern::new` on every check) and logs a malformed target instead of silently
+  never-matching. **Behavior fix:** the shared matcher enforces
+  `require_literal_separator`, so a single `*` no longer crosses `/`
+  (`reports/*` grants `reports/q1` but not `reports/2024/q1`; use `reports/**`) —
+  the safer authorization default and the semantics the RBAC docs already claimed
+  but never enforced (previously untested). Added glob edge-case tests in core
+  and at the RBAC integration level.
 
 ### 2026-06-26
 

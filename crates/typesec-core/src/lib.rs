@@ -41,6 +41,7 @@
 
 pub mod capability;
 pub mod combinator;
+pub mod glob;
 pub mod lattice;
 pub mod permissions;
 pub mod policy;
@@ -56,6 +57,7 @@ pub use capability::{
     RevocationEpoch,
 };
 pub use combinator::{CombineStrategy, ComposedEngine, PolicyEngineBuilder};
+pub use glob::{GlobPattern, is_glob_pattern};
 pub use lattice::{Implies, LatticeEngine};
 pub use permissions::{
     AiCanExfiltrate, AiCanInfer, AiCanTrain, CanDeclassify, CanDelegate, CanDelete, CanExecute,

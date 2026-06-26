@@ -1,19 +1,18 @@
 //! RBAC policy engine — implements [`PolicyEngine`] for [`RbacPolicy`].
 
 mod flatten;
-mod pattern;
 
 use std::collections::HashMap;
 
 use tracing::debug;
 use typesec_core::{
     ResourceId, SubjectId,
+    glob::{GlobPattern, is_glob_pattern},
     policy::{PolicyEngine, PolicyResult},
 };
 
 use crate::model::RbacPolicy;
 use flatten::flatten_role;
-use pattern::{GlobPattern, is_glob_pattern};
 
 /// A compiled, fast-lookup RBAC engine.
 ///

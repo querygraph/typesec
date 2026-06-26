@@ -208,3 +208,48 @@ assignments:
 
     assert!(RbacEngine::from_yaml(yaml).is_err());
 }
+
+#[test]
+fn single_star_resource_does_not_cross_separators() {
+    // `reports/*` grants one segment under `reports/` but not a deeper subtree.
+    let e = engine();
+    assert_eq!(
+        check(&e, "agent:data-pipeline", "read", "reports/q1"),
+        PolicyResult::Allow
+    );
+    assert!(matches!(
+        check(&e, "agent:data-pipeline", "read", "reports/2024/q1"),
+        PolicyResult::Deny(_)
+    ));
+}
+
+#[test]
+fn double_star_resource_and_star_subject_match_broadly() {
+    let yaml = r#"
+roles:
+  - name: auditor
+    permissions: [read]
+    resources: ["reports/**"]
+
+assignments:
+  - subject: "*"
+    roles: [auditor]
+"#;
+    let e = RbacEngine::from_yaml(yaml).expect("engine build");
+
+    // `reports/**` spans path segments...
+    assert_eq!(
+        check(&e, "agent:anyone", "read", "reports/2024/q1"),
+        PolicyResult::Allow
+    );
+    // ...and a `*` subject assignment matches any subject.
+    assert_eq!(
+        check(&e, "some:other-agent", "read", "reports/q1"),
+        PolicyResult::Allow
+    );
+    // But the role still scopes the resource: outside `reports/` is denied.
+    assert!(matches!(
+        check(&e, "agent:anyone", "read", "metrics/q1"),
+        PolicyResult::Deny(_)
+    ));
+}

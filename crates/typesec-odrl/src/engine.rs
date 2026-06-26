@@ -2,6 +2,8 @@
 
 mod index;
 
+use std::collections::HashMap;
+
 use tracing::debug;
 use typesec_core::{
     ResourceId, SubjectId,
@@ -13,7 +15,9 @@ use crate::{
     constraint::{ConstraintContext, evaluate},
     model::{OdrlDocument, OdrlRuleType},
 };
-use index::{RuleIndex, RuleRef, WildcardActionIndex, build_rule_index, target_matches};
+use index::{
+    CompiledTarget, RuleIndex, RuleRef, WildcardActionIndex, build_rule_index, compile_targets,
+};
 
 struct RuleMatch {
     policy_uid: String,
@@ -50,6 +54,9 @@ pub struct OdrlEngine {
     exact_rules: RuleIndex,
     /// Same-assignee wildcard action (`use`) rules.
     wildcard_action_rules: WildcardActionIndex,
+    /// Each rule's target glob, compiled once at load and keyed by
+    /// `(policy_index, rule_index)`.
+    compiled_targets: HashMap<(usize, usize), CompiledTarget>,
     /// Default context applied to every check (can be overridden per-check).
     default_context: ConstraintContext,
 }
@@ -58,10 +65,12 @@ impl OdrlEngine {
     /// Build an engine from a parsed document.
     pub fn new(doc: OdrlDocument) -> Self {
         let (exact_rules, wildcard_action_rules) = build_rule_index(&doc);
+        let compiled_targets = compile_targets(&doc);
         Self {
             doc,
             exact_rules,
             wildcard_action_rules,
+            compiled_targets,
             default_context: ConstraintContext::default(),
         }
     }
@@ -134,8 +143,12 @@ impl OdrlEngine {
             let policy = &self.doc.policies[rule_ref.policy_index];
             let rule = &policy.rules[rule_ref.rule_index];
 
-            // Check target (glob) matches.
-            if !target_matches(&rule.target, resource) {
+            // Check target (glob) matches, using the pattern compiled at load.
+            let target_matches = self
+                .compiled_targets
+                .get(&(rule_ref.policy_index, rule_ref.rule_index))
+                .is_some_and(|target| target.matches(resource));
+            if !target_matches {
                 continue;
             }
 

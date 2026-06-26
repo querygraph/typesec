@@ -9,6 +9,7 @@ description = "Core trait library for type-level security enforcement"
 
 [dependencies]
 chrono = { workspace = true }
+glob = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 zeroize = { workspace = true }
