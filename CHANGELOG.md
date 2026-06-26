@@ -5,6 +5,20 @@ by release version, then by the date the logical change landed.
 
 ## Unreleased
 
+## 0.11.0 — Burano
+
+### 2026-06-26
+
+Codename **Burano** — the third of the Venetian-landmark release line (after
+Murano). A workspace-wide quality/DRY/test-coverage review (the items below),
+shipping ~40 new tests (226 total), the unification of glob matching, a JWT
+hardening fix, and adoption of Grust 0.11's graph-type validation. **Behavior
+change:** a single `*` in a subject/resource/target pattern no longer crosses
+`/` separators — see the glob entry below.
+
+- Bumped the workspace and all internal path-dependency constraints (and
+  `crates/typesec-python/pyproject.toml`) from `0.10.0` to `0.11.0`.
+
 ### 2026-06-26 — review follow-ups
 
 Workspace-wide quality/DRY/test-coverage review (five-area pass). Changes land as

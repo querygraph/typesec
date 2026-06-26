@@ -14,7 +14,7 @@ default = []
 demo-crypto = []
 
 [dependencies]
-typesec-core = { version = "0.10.0", path = "../typesec-core" }
+typesec-core = { version = "0.11.0", path = "../typesec-core" }
 chacha20poly1305 = { workspace = true }
 chrono = { workspace = true }
 ed25519-dalek = { workspace = true }

@@ -8,6 +8,7 @@ landmark**, assigned in list order.
 
 | Version | Codename | Notes |
 |---|---|---|
+| 0.11.0 | Burano  | Workspace quality/DRY/test review; glob unification (behavior change); Grust 0.11 graph-type validation. |
 | 0.10.0 | Murano  | Tracks Grust 0.11.0 (Crab). |
 | 0.9.0  | Rialto  | Human-reviewability refactor; opens the Venetian-landmark line. |
 
@@ -17,7 +18,7 @@ Names already assigned are struck through.
 
 1. ~~Rialto~~ — assigned to `0.9.0`
 2. ~~Murano~~ — assigned to `0.10.0`
-3. Burano
+3. ~~Burano~~ — assigned to `0.11.0`
 4. Torcello
 5. Lido
 6. Arsenale

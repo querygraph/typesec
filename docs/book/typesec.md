@@ -1649,6 +1649,25 @@ workspace builds and the full test suite passes with no changes to the typesec
 crates, so Murano is a dependency-tracking and version-bump release. The
 codename pool and the release-cutting checklist now live in `RELEASES.md`.
 
+## Burano (0.11.0)
+
+The Burano release — the third Venetian landmark — is a workspace-wide
+quality, DRY, and test-coverage pass (the codebase was already free of
+monolithic files), adding roughly forty tests. Glob matching, previously
+reimplemented three times across the RBAC, graph, and ODRL engines with subtly
+different wildcard semantics, was unified into a single
+`typesec_core::glob::GlobPattern`; ODRL now compiles each rule's target once at
+load rather than on every check. This carries one **behavior change**: a single
+`*` in a subject, resource, or target pattern no longer crosses `/` separators,
+so `reports/*` grants `reports/q1` but not `reports/2024/q1` (use `reports/**`)
+— the safer authorization default, and the semantics the documentation already
+described. The graph engine now cross-checks every loaded policy graph against
+the declarative company schema using Grust 0.11's `GraphSchema::validate_graph`,
+so the schema and the graph can no longer silently drift. JWT verification was
+hardened to never seed its validator from the token's own `alg` header, and the
+public error types (`CapabilityError`, `AgentError`, `TaskError`) are now
+nameable by callers.
+
 # Design Tradeoffs
 
 Typesec deliberately separates runtime policy from compile-time proof. This is a

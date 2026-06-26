@@ -333,3 +333,4 @@ The full codename pool and release log live in `RELEASES.md`.
 |---|---|
 | 0.9.0 | Rialto (Ponte di Rialto) |
 | 0.10.0 | Murano (the glassmaking island) |
+| 0.11.0 | Burano (the lacemaking island) |
