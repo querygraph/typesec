@@ -15,8 +15,10 @@ by release version, then by the date the logical change landed.
   `mint_capability` → a function that demands a `Capability` → audit trail) using
   only `typesec-core`. All diagrams validated with `mmdc`.
 - Book/blog: added an **Architecture at a Glance** chapter to the book with the
-  five diagrams pre-rendered to PNG (`docs/book/diagrams/`) so they embed in the
-  EPUB/PDF/MOBI; rebuilt the artifacts. Restructured the announcement post to the
+  five diagrams as inline ```` ```mermaid ```` blocks, rendered to PNG at build
+  time by a new Pandoc Lua filter (`docs/book/mermaid.lua`, shelling out to
+  `mmdc`) so they embed in the EPUB/PDF/MOBI with no checked-in images; rebuilt
+  the artifacts. Restructured the announcement post to the
   per-post layout `docs/blog/announcing-typesec/{post.md,diagrams/}`, added the
   capability-flow and layering diagrams, and reflowed the prose to one line per
   paragraph (Ulysses/Ghost-friendly) per the Grust `TEXTPACK.md` guide.

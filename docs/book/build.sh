@@ -8,6 +8,14 @@ mkdir -p docs/book/dist
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 
+# Render inline ```mermaid blocks to PNG at build time (see docs/book/mermaid.lua).
+# The filter writes images into $MERMAID_OUT (absolute, so EPUB/PDF resolve them).
+mermaid_out="$tmpdir/diagrams"
+mkdir -p "$mermaid_out"
+export MERMAID_OUT="$mermaid_out"
+export MERMAID_PUPPETEER="$PWD/docs/book/puppeteer-config.json"
+mermaid_filter=(--lua-filter docs/book/mermaid.lua)
+
 version="$(
   awk '
     /^\[workspace\.package\]/ { in_workspace_package = 1; next }
@@ -65,6 +73,7 @@ pandoc "$tmpdir/cover.md" \
 pandoc docs/book/typesec.md \
   -o "$tmpdir/body.pdf" \
   --pdf-engine=typst \
+  "${mermaid_filter[@]}" \
   --toc \
   --number-sections
 
@@ -72,6 +81,7 @@ pdfunite "$tmpdir/cover.pdf" "$tmpdir/body.pdf" docs/book/dist/typesec.pdf
 
 pandoc "$tmpdir/cover.md" docs/book/typesec.md \
   -o docs/book/dist/typesec.epub \
+  "${mermaid_filter[@]}" \
   --toc \
   --number-sections \
   --metadata-file docs/book/metadata.yaml \

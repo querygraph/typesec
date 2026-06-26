@@ -1,7 +1,0 @@
-flowchart TD
-    I["PolicyEngine check_with_context<br/>→ Allow | Deny(reason) | Delegate(reason)"]
-    rbac["RbacEngine<br/>roles + inheritance + glob"] --> I
-    gpe["GraphPolicyEngine<br/>typed graph + deny-overrides"] --> I
-    odrl["OdrlEngine<br/>permission/prohibition/duty + constraints"] --> I
-    prov["Provider engines<br/>JWT · WorkOS · Arcade"] --> I
-    composed["ComposedEngine / FallbackEngine<br/>combine the above"] --> I

@@ -166,31 +166,81 @@ whether the proof should be minted.
 
 # Architecture at a Glance
 
-Before the prose tour, five pictures of the load-bearing pieces. They also live,
-in source form, in `docs/architecture.md` (rendered inline on GitHub).
+Before the prose tour, five pictures of the load-bearing pieces. The Mermaid
+sources are inline below (the book build renders them; GitHub renders them too).
 
 The single most important diagram is the capability-minting flow. A `Capability`
 is unforgeable proof, and the only production path to one runs a `PolicyEngine`
 and emits an audit event; a denial is a typed error, never a capability.
 
-![The capability-minting flow](docs/book/diagrams/capability-flow.png)
+```mermaid
+flowchart LR
+    R["Request:<br/>subject + action + resource"] --> E{"PolicyEngine<br/>check_with_context"}
+    E -->|Allow| M["mint_capability*"]
+    E -->|"Deny(reason)"| D["Err: CapabilityError::Denied"]
+    E -->|Delegate| FB{"fallback engine?"}
+    FB -->|yes| E
+    FB -->|no| U["Err: UnhandledDelegation"]
+    M --> A[("AuditEvent<br/>(always emitted)")]
+    M --> C["Capability P,R<br/>unforgeable proof"]
+    C --> G["guarded fn that<br/>demands Capability P,R"]
+    classDef ok fill:#e6ffed,stroke:#2da44e;
+    classDef bad fill:#ffebe9,stroke:#cf222e;
+    class M,C,G ok;
+    class D,U bad;
+```
 
 The workspace is nine crates layered on `typesec-core`; the umbrella `typesec`
 crate re-exports the rest behind feature flags.
 
-![Workspace layering](docs/book/diagrams/layering.png)
+```mermaid
+flowchart TD
+    core["typesec-core<br/>Capability · PolicyEngine · SecureValue · typestate · glob"]
+    macro["typesec-macro"] --> core
+    rbac["typesec-rbac<br/>RBAC + Graph engines"] --> core
+    odrl["typesec-odrl<br/>ODRL engine + audit"] --> core
+    integ["typesec-integrations<br/>JWT · WorkOS · Arcade · DID"] --> core
+    agent["typesec-agent<br/>SecureAgent · ProtectedTool"] --> core
+    agent --> rbac
+    agent --> odrl
+    py["typesec-python"] --> core
+    cli["typesec-cli"] --> agent
+    cli --> integ
+    facade["typesec (facade)"] --> agent
+    facade --> integ
+    facade --> macro
+```
 
 Every engine — RBAC, the graph engine, ODRL, and the provider-backed engines —
 implements the same `check_with_context` contract returning `Allow`, `Deny`, or
 `Delegate`, so they compose under `ComposedEngine` and `FallbackEngine`.
 
-![One policy contract, many engines](docs/book/diagrams/engine-contract.png)
+```mermaid
+flowchart TD
+    I["PolicyEngine check_with_context<br/>→ Allow | Deny(reason) | Delegate(reason)"]
+    rbac["RbacEngine<br/>roles + inheritance + glob"] --> I
+    gpe["GraphPolicyEngine<br/>typed graph + deny-overrides"] --> I
+    odrl["OdrlEngine<br/>permission/prohibition/duty + constraints"] --> I
+    prov["Provider engines<br/>JWT · WorkOS · Arcade"] --> I
+    composed["ComposedEngine / FallbackEngine<br/>combine the above"] --> I
+```
 
 `SecureAgent<S>` is a typestate machine: the capability-requesting and `execute`
 methods exist only on the `Authenticated` state, so calling them on an
 unauthenticated agent is a compile error, not a runtime check.
 
-![The agent typestate](docs/book/diagrams/agent-typestate.png)
+```mermaid
+stateDiagram-v2
+    [*] --> Unauthenticated
+    Unauthenticated --> Authenticated: authenticate_with
+    Authenticated --> Authenticated: request_capability
+    Authenticated --> Authenticated: execute
+    note right of Unauthenticated
+      request_capability and execute do not
+      exist on this state — calling them is
+      a compile error
+    end note
+```
 
 When agents collaborate, a prompt is sealed into a DID envelope whose ciphertext
 is AEAD-bound to its routing and timing identity; the gateway verifies signature,
@@ -198,7 +248,19 @@ replay, and expiry, then reveals the plaintext only under a typed capability and
 returns an audit-safe attestation that records who did what to which resource
 without exposing the payload.
 
-![DID/TypeDID agent-to-agent messaging](docs/book/diagrams/did-sequence.png)
+```mermaid
+sequenceDiagram
+    participant A as Agent A (sender)
+    participant G as TypeDID Gateway (recipient)
+    participant P as PolicyEngine
+    A->>A: seal(prompt) → DID envelope<br/>(Ed25519 sign + ChaCha20-Poly1305, AAD-bound)
+    A->>G: envelope
+    G->>G: verify signature · reject replay · check expiry
+    G->>P: mint_capability(subject, action, resource)
+    P-->>G: Allow → Capability
+    G->>G: reveal payload under the capability
+    G-->>A: audit-safe attestation<br/>(subject, action, resource, privacy — no payload)
+```
 
 # Workspace Tour
 

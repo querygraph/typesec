@@ -1,5 +1,22 @@
 # Book Build Notes
 
+## Prerequisites
+
+`docs/book/build.sh` needs Pandoc (with the `typst` PDF engine), `pdfunite`,
+Calibre's `ebook-convert`, and — for the architecture diagrams — the Mermaid CLI
+`mmdc` (`npm i -g @mermaid-js/mermaid-cli`).
+
+## Mermaid diagrams
+
+The manuscript carries diagrams as inline ```` ```mermaid ```` code blocks (so
+GitHub renders them too). Pandoc can't render Mermaid, so the build passes
+`--lua-filter docs/book/mermaid.lua`, which shells out to `mmdc` to render each
+block to a PNG (white background, 2×) into a temp dir and substitutes an image.
+The filter reads `$MERMAID_OUT` (set by `build.sh`) and an optional
+`$MERMAID_PUPPETEER` config (`docs/book/puppeteer-config.json`, which passes
+`--no-sandbox` for headless/CI Chrome). Edit a diagram by editing its mermaid
+block in `docs/book/typesec.md`; there are no checked-in diagram images.
+
 ## Separate Cover Page
 
 Use `docs/book/cover.md` as a standalone cover source and keep it separate from the
@@ -46,6 +63,7 @@ Render the book body separately, with the table of contents:
 pandoc docs/book/typesec.md \
   -o "$tmpdir/body.pdf" \
   --pdf-engine=typst \
+  --lua-filter docs/book/mermaid.lua \
   --toc \
   --number-sections
 ```
@@ -67,6 +85,7 @@ Pass the cover file before the manuscript:
 ```sh
 pandoc "$tmpdir/cover.md" docs/book/typesec.md \
   -o docs/book/dist/typesec.epub \
+  --lua-filter docs/book/mermaid.lua \
   --toc \
   --number-sections \
   --metadata-file docs/book/metadata.yaml \
