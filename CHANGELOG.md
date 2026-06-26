@@ -5,6 +5,16 @@ by release version, then by the date the logical change landed.
 
 ## Unreleased
 
+### 2026-06-26
+
+- Docs: corrected the stale "Grust is a local path dependency, not on crates.io"
+  claim in `CLAUDE.md` and the book. Grust is published on crates.io (the
+  `grust-*` crates are at `0.11.0`, codename Crab); the workspace pins each with
+  both a `version` and a local `path`, so local builds use the sibling `../grust`
+  checkout while the `version` resolves against crates.io for published/sibling-
+  less builds. This is also why Typesec itself publishes to crates.io (all eight
+  crates released at `0.10.0`). Rebuilt the book artifacts.
+
 ## 0.10.0 — Murano
 
 ### 2026-06-26

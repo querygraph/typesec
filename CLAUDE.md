@@ -184,10 +184,14 @@ unenforced profile metadata fields (integrations); `apply_company_graph_cypher_c
 `graph_policy.rs` hides undocumented public API.
 
 ### Book / docs [B] (`docs/book/typesec.md`)
-- **Grust is a local path dep at 0.10.0**, not "published crates.io at 0.9" as the
-  book claims repeatedly (Workspace Tour, "What We Improved", Design Tradeoffs).
-  The company-graph example needs a sibling `../grust` checkout — not reproducible
-  off this machine. Largest factual error.
+- ~~**Grust is a local path dep, not published on crates.io**~~ — **corrected
+  2026-06-26 (no longer true).** Grust *is* published on crates.io;
+  `grust-graph`/`grust-cypher`/`grust-sail` are at `0.11.0` (codename Crab). The
+  workspace deps carry both `version` and `path = "../grust/..."`, so a local
+  build still uses the sibling `../grust` checkout (path wins locally) while the
+  `version` resolves against crates.io when publishing — which is why typesec
+  itself publishes to crates.io (all 8 crates at 0.10.0 / Murano). For a
+  from-crates.io build without the sibling checkout, drop the `path` keys.
 - `Capability`/`new_minted` shown with `String` fields — actually `SubjectId`/
   `ResourceId`.
 - Roadmap still lists `typesec check --json` as future work — it's shipped; the

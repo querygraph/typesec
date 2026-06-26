@@ -228,9 +228,12 @@ The root workspace uses Rust 2024. Common dependencies are declared in
 (`pyo3`), and the DID envelope cryptography crates (`ed25519-dalek`,
 `x25519-dalek`, `chacha20poly1305`, `sha2`, `getrandom`).
 
-The workspace depends on Grust through a **local path checkout**, not crates.io.
-The Cypher company-graph example therefore needs a sibling `../grust` checkout to
-build:
+Grust is published on crates.io (`grust-graph`, `grust-cypher`, and `grust-sail`
+are at `0.11.0`, codename Crab). The workspace pins each dependency with both a
+`version` and a local `path`, so a checkout that has a sibling `../grust` builds
+against that working copy (the `path` wins locally), while the `version`
+resolves against crates.io when Typesec is published or built without the
+sibling checkout:
 
 ```toml
 # workspace Cargo.toml
@@ -238,6 +241,10 @@ grust-graph  = { version = "0.11.0", path = "../grust/crates/grust", features = 
 grust-cypher = { version = "0.11.0", path = "../grust/crates/grust-cypher" }
 grust-sail   = { version = "0.11.0", path = "../grust/crates/grust-sail" }
 ```
+
+To build the Cypher company-graph example purely from crates.io, drop the `path`
+keys and keep the `version`; to develop Typesec and Grust together, keep the
+sibling `../grust` checkout.
 
 The package is named `grust-graph`, while its library is imported as `grust`.
 The facade re-exports the core graph API, while `grust-sail` exposes the Sail
@@ -1585,9 +1592,11 @@ WorkOS handles enterprise identity and resource authorization, Arcade handles
 agent-oriented SaaS tool authorization, and Typesec makes the resulting local
 authority impossible to forget at the call site.
 
-The Grust dependency was bumped to the 0.10 line. It remains a local path
-dependency (`../grust`), so the Cypher company-graph example builds only
-alongside a sibling Grust checkout — see the Workspace Tour.
+The Grust dependency was bumped to the 0.11 line (codename Crab). Grust is
+published on crates.io, and the workspace pins each Grust crate with both a
+`version` and a local `path` (`../grust`): a checkout with a sibling Grust
+working copy builds against it, while the published `version` resolves for
+crates.io builds and when Typesec itself is published — see the Workspace Tour.
 
 A security review pass then hardened the runtime half of the system to match
 what the type-level half advertises. `SecureValue` stopped deriving `Debug`
