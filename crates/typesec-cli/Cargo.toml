@@ -12,6 +12,10 @@ name = "typesec"
 path = "src/main.rs"
 
 [[example]]
+name = "core_capability"
+path = "../../examples/core_capability.rs"
+
+[[example]]
 name = "rbac_agent"
 path = "../../examples/rbac_agent.rs"
 

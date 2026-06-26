@@ -5,6 +5,16 @@ by release version, then by the date the logical change landed.
 
 ## Unreleased
 
+### 2026-06-26
+
+- Docs/examples: added `docs/architecture.md` with Mermaid diagrams (the
+  capability-minting flow, workspace layering, the one-trait-many-engines policy
+  contract, the agent typestate, and DID/TypeDID messaging), embedded the two
+  key diagrams in the README, and added `examples/core_capability.rs` — the
+  smallest end-to-end demo of the load-bearing loop (custom `PolicyEngine` →
+  `mint_capability` → a function that demands a `Capability` → audit trail) using
+  only `typesec-core`. All diagrams validated with `mmdc`.
+
 ## 0.11.0 — Burano
 
 ### 2026-06-26

@@ -42,9 +42,48 @@ The `Capability<P, R>` struct is **unforgeable**:
   and `Capability<CanWrite, Report>` are *different types*.
 - The [`Permission`] trait is sealed — you can't create new permissions outside `typesec-core`.
 
+The only production path to a capability runs a policy check and emits an audit
+event; a denial is a typed error, never a capability:
+
+```mermaid
+flowchart LR
+    R["Request:<br/>subject + action + resource"] --> E{"PolicyEngine<br/>check"}
+    E -->|Allow| M["mint_capability*"]
+    E -->|"Deny(reason)"| D["Err: Denied"]
+    E -->|Delegate| FB["fallback / UnhandledDelegation"]
+    M --> A[("AuditEvent")]
+    M --> C["Capability P,R<br/>unforgeable proof"]
+    C --> G["guarded fn that<br/>demands Capability P,R"]
+```
+
+A runnable version of this loop, using nothing but `typesec-core`, is
+[`examples/core_capability.rs`](examples/core_capability.rs)
+(`cargo run --example core_capability`).
+
 ---
 
 ## Architecture
+
+See [`docs/architecture.md`](docs/architecture.md) for the full diagram set
+(capability flow, policy-engine contract, agent typestate, DID messaging).
+
+```mermaid
+flowchart TD
+    core["typesec-core"]
+    macro["typesec-macro"] --> core
+    rbac["typesec-rbac"] --> core
+    odrl["typesec-odrl"] --> core
+    integ["typesec-integrations"] --> core
+    agent["typesec-agent"] --> core
+    agent --> rbac
+    agent --> odrl
+    py["typesec-python"] --> core
+    cli["typesec-cli"] --> agent
+    cli --> integ
+    facade["typesec (facade)"] --> agent
+    facade --> integ
+    facade --> macro
+```
 
 ```
 typesec           ← facade crate re-exporting the common API
@@ -308,6 +347,7 @@ cd typesec
 cargo build
 cargo test
 cargo run -p typesec-cli -- validate --policy policies/rbac-example.yaml
+cargo run --example core_capability   # the foundational loop, typesec-core only
 cargo run --example rbac_agent
 cargo run --example odrl_agent
 cargo run -p typesec-cli --example provider_integrations

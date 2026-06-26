@@ -147,6 +147,27 @@ cargo fuzz run rbac_yaml -- -max_total_time=300
 cargo fuzz run odrl_yaml -- -max_total_time=300
 ```
 
+## `core_capability.rs`
+
+Path:
+
+```text
+examples/core_capability.rs
+```
+
+The smallest end-to-end example: the foundational capability loop using nothing
+but `typesec-core` — no agent, no YAML, no integrations. It defines a tiny
+hand-written `PolicyEngine`, mints a `Capability` through the single gated path
+(`mint_capability`), passes it to a function that *demands* one, shows that a
+denial yields a typed error instead of a capability, and prints the audit trail
+via a custom `AuditSink`. Start here to understand the load-bearing invariant.
+
+Run it:
+
+```sh
+cargo run --example core_capability
+```
+
 ## `rbac_agent.rs`
 
 Path:
