@@ -64,7 +64,6 @@ regex_escape() {
 expected_title_pattern="$(regex_escape "$expected_title")"
 expected_stem="${expected_title% (*}"
 stable_epub="$dist_dir/$expected_stem.epub"
-kindle_epub="$dist_dir/$expected_title.epub"
 version_marker="$dist_dir/VERSION.md"
 
 require_pattern "<dc:title[^>]*>$expected_title_pattern</dc:title>" "$opf" "missing dc:title"
@@ -123,9 +122,19 @@ if [[ ! -f "$version_marker" ]]; then
   exit 1
 fi
 
+stem_pattern="$(regex_escape "$expected_stem")"
 require_pattern "^kindle_name: $expected_title_pattern$" "$version_marker" "VERSION.md missing Kindle name"
+require_pattern '^version_stamp: [0-9]+\.[0-9]+\.[0-9]+-[0-9a-z]+$' "$version_marker" "VERSION.md missing version stamp"
 require_pattern '^built_at: [0-9]{4}-[0-9]{2}-[0-9]{2}$' "$version_marker" "VERSION.md missing build date"
 require_pattern "^epub_file: $(regex_escape "$(basename "$stable_epub")")$" "$version_marker" "VERSION.md missing stable EPUB filename"
-require_pattern "^kindle_link: $(regex_escape "$(basename "$kindle_epub")")$" "$version_marker" "VERSION.md missing versioned symlink filename"
+require_pattern "^pdf_file: ${stem_pattern}\.pdf$" "$version_marker" "VERSION.md missing stable PDF filename"
+require_pattern "^epub_link: ${stem_pattern} \(.+\)\.epub$" "$version_marker" "VERSION.md missing versioned EPUB link"
+require_pattern "^pdf_link: ${stem_pattern} \(.+\)\.pdf$" "$version_marker" "VERSION.md missing versioned PDF link"
+
+# The versioned delivery links must exist and resolve to the stable files.
+epub_link="$(awk -F': ' '/^epub_link:/ { print $2 }' "$version_marker")"
+pdf_link="$(awk -F': ' '/^pdf_link:/ { print $2 }' "$version_marker")"
+[[ -e "$dist_dir/$epub_link" ]] || { echo "EPUB metadata check failed: missing link $epub_link" >&2; exit 1; }
+[[ -e "$dist_dir/$pdf_link" ]]  || { echo "EPUB metadata check failed: missing link $pdf_link" >&2; exit 1; }
 
 echo "EPUB metadata check passed: $epub"

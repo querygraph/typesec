@@ -53,15 +53,25 @@ if [[ -z "$kindle_short_title" ]]; then
   kindle_short_title="typesec"
 fi
 
+# The visible title/cover stays clean (no commit hash). The delivery links carry
+# a `<version>-<short-hash>` stamp so each built EPUB/PDF is traceable to a commit.
 kindle_name="$kindle_short_title ($version)"
+githash="$(git rev-parse --short=6 HEAD 2>/dev/null || echo nogit)"
+version_stamp="$version-$githash"
+link_stem="$kindle_short_title ($version_stamp)"
 stable_epub="docs/book/dist/$kindle_short_title.epub"
-kindle_epub="docs/book/dist/$kindle_name.epub"
+stable_pdf="docs/book/dist/$kindle_short_title.pdf"
+versioned_epub="docs/book/dist/$link_stem.epub"
+versioned_pdf="docs/book/dist/$link_stem.pdf"
 
 {
   printf 'kindle_name: %s\n' "$kindle_name"
+  printf 'version_stamp: %s\n' "$version_stamp"
   printf 'built_at: %s\n' "$pubdate"
   printf 'epub_file: %s.epub\n' "$kindle_short_title"
-  printf 'kindle_link: %s.epub\n' "$kindle_name"
+  printf 'pdf_file: %s.pdf\n' "$kindle_short_title"
+  printf 'epub_link: %s.epub\n' "$link_stem"
+  printf 'pdf_link: %s.pdf\n' "$link_stem"
 } > docs/book/dist/VERSION.md
 
 sed "s/{{KINDLE_NAME}}/$kindle_name/g" docs/book/cover.md > "$tmpdir/cover.md"
@@ -90,8 +100,11 @@ pandoc "$tmpdir/cover.md" docs/book/typesec.md \
   --epub-title-page=false
 
 docs/book/fix_epub_layout.sh docs/book/dist/typesec.epub "$kindle_name"
-find docs/book/dist -maxdepth 1 -name "$kindle_short_title (*).epub" -exec rm -f {} +
-ln -s "$(basename "$stable_epub")" "$kindle_epub"
+# Refresh the versioned delivery links (EPUB + PDF) for this build's stamp.
+find docs/book/dist -maxdepth 1 \
+  \( -name "$kindle_short_title (*).epub" -o -name "$kindle_short_title (*).pdf" \) -delete
+ln -s "$(basename "$stable_epub")" "$versioned_epub"
+ln -s "$(basename "$stable_pdf")" "$versioned_pdf"
 docs/book/check_epub_metadata.sh docs/book/dist/typesec.epub "$kindle_name"
 
 /Applications/calibre.app/Contents/MacOS/ebook-convert \

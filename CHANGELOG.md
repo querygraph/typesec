@@ -24,6 +24,12 @@ by release version, then by the date the logical change landed.
   paragraph (Ulysses/Ghost-friendly) per `TEXTPACK.md`. The built `.textpack` is
   committed next to the post under `docs/blog/announcing-typesec/dist/`, and
   `docs/book/PUBLISH.md` records that every blog post ships one.
+- Book delivery: the build now maintains a commit-stamped versioned link for
+  **both** the EPUB and the PDF (`typesec (<version>-<short-commit>).{epub,pdf}`),
+  recorded in `VERSION.md` as `epub_link`/`pdf_link` (git-ignored, local); the
+  visible title/cover stays clean. `PUBLISH.md` documents publishing both stamped
+  artifacts to `~/icloud/books`; `check_epub_metadata.sh` validates the new
+  fields and that the links resolve.
 
 ## 0.11.0 — Burano
 

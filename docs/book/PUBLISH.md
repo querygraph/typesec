@@ -262,21 +262,37 @@ can pick them up directly.
 
 ## Delivery
 
-For local iCloud delivery, copy the versioned symlink path by name:
+The build maintains a versioned delivery link for **both** the EPUB and the PDF
+in `dist/`, stamped `stem (<version>-<short-commit>)` (e.g.
+`typesec (0.11.0-28b8ba).epub` / `.pdf`) — the commit hash makes each built
+artifact traceable to a source state, while the book's visible title/cover stays
+clean. `VERSION.md` records both as `epub_link` and `pdf_link`. The versioned
+links are git-ignored (build-time, local).
+
+For local iCloud delivery, always publish **both** stamped artifacts to
+`~/icloud/books`, copying each link by name (resolving the symlink to a real
+file):
 
 ```sh
-kindle_link=$(awk -F': ' '/^kindle_link:/ { print $2 }' docs/book/dist/VERSION.md)
-cp "docs/book/dist/$kindle_link" "$HOME/icloud/books/"
+epub_link=$(awk -F': ' '/^epub_link:/ { print $2 }' docs/book/dist/VERSION.md)
+pdf_link=$(awk -F': ' '/^pdf_link:/  { print $2 }' docs/book/dist/VERSION.md)
+cp "docs/book/dist/$epub_link" "$HOME/icloud/books/$epub_link"
+cp "docs/book/dist/$pdf_link"  "$HOME/icloud/books/$pdf_link"
 ```
 
-This produces a regular EPUB file at:
+This produces two regular files preserving the stamped filename:
 
 ```text
-~/icloud/books/typesec (<workspace-version>).epub
+~/icloud/books/typesec (<version>-<short-commit>).epub
+~/icloud/books/typesec (<version>-<short-commit>).pdf
 ```
 
-That is intentional: the destination should preserve the versioned filename,
-not the symlink relationship.
+Verify by exact path (do not list the directory):
+
+```sh
+cmp "docs/book/dist/$epub_link" "$HOME/icloud/books/$epub_link"
+cmp "docs/book/dist/$pdf_link"  "$HOME/icloud/books/$pdf_link"
+```
 
 Do not treat iCloud delivery as a broad directory-access task. On this Mac,
 listing `~/icloud/books` can fail with `Operation not permitted` even when a

@@ -100,11 +100,14 @@ empty generated title page before the custom cover.
 The visible cover, NCX title, and navigation title still say `Typesec`, while
 the OPF metadata title used by Kindle libraries comes from a short distribution
 title plus the workspace version, for example `typesec (<workspace-version>)`.
-The build keeps the stable title-stem EPUB at `docs/book/dist/typesec.epub` and
-creates a versioned Send to Kindle symlink,
-`docs/book/dist/typesec (<workspace-version>).epub`, that points back to it.
-`docs/book/dist/VERSION.md` records the Kindle name, build date, stable EPUB
-filename, and symlink filename.
+The build keeps the stable title-stem files at `docs/book/dist/typesec.epub` and
+`docs/book/dist/typesec.pdf`, and creates a versioned delivery symlink for *both*
+formats, stamped `typesec (<workspace-version>-<short-commit>).{epub,pdf}`, that
+points back to the stable file. The commit hash makes each built artifact
+traceable to a source state while the visible title/cover stays clean; the
+stamped links are git-ignored (build-time, local). `docs/book/dist/VERSION.md`
+records the Kindle name, version stamp, build date, the stable EPUB/PDF
+filenames, and the versioned `epub_link`/`pdf_link`.
 
 `docs/book/fix_epub_layout.sh` then repairs Kindle-facing reading order by
 placing the custom cover first in the EPUB spine, marking the navigation
