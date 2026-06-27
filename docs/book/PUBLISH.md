@@ -253,11 +253,12 @@ bundles the text plus image assets into a single `.textpack` that imports cleanl
 into Ulysses/Ghost (including on iOS, where `mermaid` blocks and relative image
 paths do not render).
 
-The `.textpack` is a **deliverable, not a committed file** — generate it under
-`/tmp` (or the session scratchpad) and hand it to the user; keep the repo source
-clean (`post.md` + `diagrams/*.mmd` + `*.png`). Unlike the book, blog posts do
-not use the build-time Mermaid filter — their PNGs are committed so the
-`.textpack` bundler can pick them up directly.
+The built `.textpack` is **committed next to the post** under
+`docs/blog/<name>/dist/` (mirroring `docs/book/dist/`), so each release's
+ready-to-import bundle is versioned with the post. Commit only the `.textpack`,
+not the unzipped `.textbundle/`. Unlike the book, blog posts do not use the
+build-time Mermaid filter — their PNGs are committed so the `.textpack` bundler
+can pick them up directly.
 
 ## Delivery
 

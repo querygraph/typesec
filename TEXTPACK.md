@@ -101,7 +101,8 @@ import re, os, json, zipfile, shutil
 base = "docs/blog/announcing-typesec"
 post = open(f"{base}/post.md").read()
 ddir = f"{base}/diagrams"
-out  = "/tmp"                                  # deliverable location (not committed)
+out  = f"{base}/dist"                          # committed, next to the post
+os.makedirs(out, exist_ok=True)
 tb   = f"{out}/announcing-typesec.textbundle"
 shutil.rmtree(tb, ignore_errors=True); os.makedirs(f"{tb}/assets", exist_ok=True)
 imgs = set(re.findall(r"!\[[^\]]*\]\(diagrams/([a-z0-9-]+\.png)\)", post))
@@ -116,6 +117,7 @@ with zipfile.ZipFile(pack, "w", zipfile.ZIP_DEFLATED) as z:
     for root, _, files in os.walk(tb):
         for fn in files:
             p = os.path.join(root, fn); z.write(p, os.path.relpath(p, out))
+shutil.rmtree(tb)   # keep only the .textpack in dist/, not the unzipped bundle
 ```
 
 The zip's top entry must be `<name>.textbundle/` (verify with
@@ -136,9 +138,11 @@ the more reliable bundle for Ulysses.
 - **White background, 2× scale** for crisp, paste-anywhere images.
 - **iOS:** relative image paths in pasted Markdown do not resolve — only the
   bundled `.textpack` (or base64) shows images inline.
-- **Don't commit the bundles.** `.textpack` / base64 `.md` duplicate the PNGs and
-  bloat git; generate them as deliverables (e.g. under `/tmp`) and keep the repo
-  source clean (`post.md` + `diagrams/*.mmd` + `*.png`).
+- **Commit the `.textpack` in `dist/`.** Keep the built `.textpack` next to the
+  post under `docs/blog/<name>/dist/` (mirroring `docs/book/dist/`), so each
+  release's ready-to-import bundle is versioned with the post. Commit only the
+  `.textpack`, not the unzipped `.textbundle/`. (It re-bundles the diagram PNGs,
+  which is an accepted, small duplication.) Don't commit a base64 fallback `.md`.
 
 ## Relation to releases
 

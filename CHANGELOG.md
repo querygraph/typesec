@@ -21,7 +21,9 @@ by release version, then by the date the logical change landed.
   the artifacts. Restructured the announcement post to the
   per-post layout `docs/blog/announcing-typesec/{post.md,diagrams/}`, added the
   capability-flow and layering diagrams, and reflowed the prose to one line per
-  paragraph (Ulysses/Ghost-friendly) per the Grust `TEXTPACK.md` guide.
+  paragraph (Ulysses/Ghost-friendly) per `TEXTPACK.md`. The built `.textpack` is
+  committed next to the post under `docs/blog/announcing-typesec/dist/`, and
+  `docs/book/PUBLISH.md` records that every blog post ships one.
 
 ## 0.11.0 — Burano
 
