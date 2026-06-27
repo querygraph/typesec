@@ -235,6 +235,30 @@ If Calibre reports a permissions error while rendering metadata under
 `~/Library/Preferences/calibre`, the metadata lines may still print. For a full
 MOBI rebuild, rerun `docs/book/build.sh` with normal filesystem access.
 
+## Blog Posts
+
+Each release also ships a blog post. Posts use the per-post layout
+`docs/blog/<name>/`:
+
+- `post.md` — the canonical post (prose reflowed to one line per paragraph;
+  diagrams referenced as `![caption](diagrams/<name>.png)`).
+- `diagrams/<name>.mmd` — the Mermaid source for each diagram.
+- `diagrams/<name>.png` — the rendered image (white background, 2×) committed
+  alongside its source.
+
+**Always create a `.textpack` for each blog post**, following
+[`TEXTPACK.md`](../../TEXTPACK.md) (repo root). That guide is the required
+last-mile step: it reflows the prose, renders the Mermaid diagrams to PNG, and
+bundles the text plus image assets into a single `.textpack` that imports cleanly
+into Ulysses/Ghost (including on iOS, where `mermaid` blocks and relative image
+paths do not render).
+
+The `.textpack` is a **deliverable, not a committed file** — generate it under
+`/tmp` (or the session scratchpad) and hand it to the user; keep the repo source
+clean (`post.md` + `diagrams/*.mmd` + `*.png`). Unlike the book, blog posts do
+not use the build-time Mermaid filter — their PNGs are committed so the
+`.textpack` bundler can pick them up directly.
+
 ## Delivery
 
 For local iCloud delivery, copy the versioned symlink path by name:
